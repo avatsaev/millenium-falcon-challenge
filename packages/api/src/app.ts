@@ -5,11 +5,38 @@ import fastifyStatic from "@fastify/static";
 import {
   InvalidConfigError,
   computeOdds,
+  dedupeSightings,
   parseEmpireConfig,
   type FalconConfig,
   type Graph,
 } from "@falcon/core";
 import Fastify, { type FastifyInstance, type FastifyRequest } from "fastify";
+
+interface RouteRow {
+  readonly origin: string;
+  readonly destination: string;
+  readonly travelTime: number;
+}
+
+/**
+ * Collapses the graph's directed adjacency back to one row per undirected route (each route is
+ * stored both ways), sorted by `(origin asc, destination asc)` so the response is deterministic
+ * across requests regardless of insertion order.
+ */
+function undirectedRoutes(graph: Graph): RouteRow[] {
+  const rows: RouteRow[] = [];
+  for (let planetIdx = 0; planetIdx < graph.planets.length; planetIdx++) {
+    for (const edge of graph.adjacency[planetIdx]!) {
+      if (edge.to <= planetIdx) continue;
+      const nameA = graph.planets[planetIdx]!;
+      const nameB = graph.planets[edge.to]!;
+      const [origin, destination] = nameA < nameB ? [nameA, nameB] : [nameB, nameA];
+      rows.push({ origin, destination, travelTime: edge.travelTime });
+    }
+  }
+  rows.sort((a, b) => (a.origin !== b.origin ? (a.origin < b.origin ? -1 : 1) : a.destination < b.destination ? -1 : a.destination > b.destination ? 1 : 0));
+  return rows;
+}
 
 export interface BuildAppOptions {
   readonly falconConfig: FalconConfig;
@@ -47,12 +74,15 @@ export async function buildApp(options: BuildAppOptions): Promise<FastifyInstanc
     await app.register(fastifyStatic, { root: staticRoot });
   }
 
+  /** Liveness probe: no in-repo consumer, but the cheapest thing a healthcheck or orchestrator can hit. */
   app.get("/api/health", async () => ({ status: "ok" as const }));
 
-  app.get("/api/mission", async () => ({
+  app.get("/api/universe", async () => ({
     departure: falconConfig.departure,
     arrival: falconConfig.arrival,
     autonomy: falconConfig.autonomy,
+    planets: graph.planets,
+    routes: undirectedRoutes(graph),
   }));
 
   app.post("/api/odds", async (request, reply) => {
@@ -90,6 +120,10 @@ export async function buildApp(options: BuildAppOptions): Promise<FastifyInstanc
       oddsPercent: Math.round(result.odds * 100),
       reachable: result.reachable,
       minRiskEncounters: result.minRiskEncounters,
+      arrivalDay: result.arrivalDay,
+      countdown: empireConfig.countdown,
+      bountyHunters: dedupeSightings(empireConfig.bountyHunters),
+      itinerary: result.itinerary,
     };
   });
 

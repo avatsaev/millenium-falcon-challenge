@@ -1,5 +1,5 @@
 import { QueryClient } from "@tanstack/react-query";
-import { ApiError } from "./api";
+import { ApiError } from "./client";
 
 /**
  * Shared query-client policy so the app and the tests configure retries identically.

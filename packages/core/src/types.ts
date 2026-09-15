@@ -30,6 +30,20 @@ export interface EmpireConfig {
   readonly bountyHunters: readonly BountyHunterSighting[];
 }
 
+/** One day-stamped action in the Falcon's plan. */
+export interface ItineraryStep {
+  /** Day the Falcon is on `planet` once this action completes (0 for the initial parked state). */
+  readonly day: number;
+  readonly planet: string;
+  readonly action: "start" | "jump" | "wait" | "refuel";
+  /** Planet left behind -- `jump` steps only, else null. */
+  readonly from: string | null;
+  /** Fuel in the tank once the action completes, in days of travel. */
+  readonly fuelAfter: number;
+  /** Bounty hunters scheduled on `planet` that `day` -- i.e. a 10% capture roll happened here. */
+  readonly huntersPresent: boolean;
+}
+
 /** Result of the odds-of-success computation. */
 export interface OddsResult {
   /** Probability (0..1) that the Falcon reaches the arrival planet in time, undetected. */
@@ -38,4 +52,8 @@ export interface OddsResult {
   readonly reachable: boolean;
   /** Minimum number of risky bounty-hunter encounters along the best route, or null if unreachable. */
   readonly minRiskEncounters: number | null;
+  /** Day the Falcon lands on the arrival planet, or null if unreachable. */
+  readonly arrivalDay: number | null;
+  /** The canonical day-by-day plan, or null if unreachable. */
+  readonly itinerary: readonly ItineraryStep[] | null;
 }

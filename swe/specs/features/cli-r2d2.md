@@ -77,8 +77,14 @@ unlike the API).
 built `packages/cli/dist/cli.js` against all four example fixtures and both error paths during initial
 build.)
 
-## TODO(verify)
+## Resolved (was TODO(verify))
 
-- [ ] No `bin` symlink is installed globally yet (README shows `$ give-me-the-odds ...` as if
-      installed on `PATH`). Currently run via `node packages/cli/dist/cli.js ...`. Decide whether a task
-      should wire `pnpm link --global` or document the equivalent for submission.
+- [x] **README deviation — resolved by sprint-002/task-001.** README:116-119 pins the CLI as an
+      installed executable (`$ give-me-the-odds <falcon.json> <empire.json>` → `81`). The `bin` entry
+      (`packages/cli/package.json`: `"bin": { "give-me-the-odds": "./dist/cli.js" }`) and the
+      `#!/usr/bin/env node` shebang in `src/cli.ts` were already correct — nothing needed adding there.
+      The only missing piece was the install step: root `package.json` now has a `link:cli` script
+      (`pnpm --filter @falcon/cli exec pnpm add -g .`, run after `pnpm run build`) that links the built
+      bin onto the global `pnpm` bin directory. `SUBMISSION.md` at the repo root documents the verified
+      invocation. `command -v give-me-the-odds` resolves after linking, and the four fixture
+      invocations print `0` / `81` / `90` / `100`.

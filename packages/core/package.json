@@ -12,7 +12,9 @@
       "default": "./dist/index.js"
     }
   },
-  "files": ["dist"],
+  "files": [
+    "dist"
+  ],
   "scripts": {
     "build": "tsup",
     "dev": "tsup --watch",
@@ -22,7 +24,7 @@
     "lint": "tsc --noEmit"
   },
   "dependencies": {
-    "better-sqlite3": "^11.8.1"
+    "better-sqlite3": "^13.0.3"
   },
   "devDependencies": {
     "@types/better-sqlite3": "^7.6.12",

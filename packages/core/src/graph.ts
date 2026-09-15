@@ -48,5 +48,19 @@ export function buildGraph(routes: readonly Route[], extraPlanets: readonly stri
     adjacency[destinationIdx]!.push({ to: originIdx, travelTime: route.travelTime });
   }
 
+  // Sort every adjacency list by (travelTime asc, destination name asc). This is not an
+  // optimisation -- the odds value is a minimum over edges and therefore order-independent, but
+  // the *reconstructed* itinerary is chosen by first-writer-wins under the DP's sweep order, so
+  // sorting here is what makes the plan a function of the universe rather than of SQLite's
+  // row-insertion order.
+  for (const edges of adjacency) {
+    edges.sort((a, b) => {
+      if (a.travelTime !== b.travelTime) return a.travelTime - b.travelTime;
+      const nameA = planets[a.to]!;
+      const nameB = planets[b.to]!;
+      return nameA < nameB ? -1 : nameA > nameB ? 1 : 0;
+    });
+  }
+
   return { planets, planetIndex, adjacency };
 }

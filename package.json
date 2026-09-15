@@ -6,10 +6,11 @@
   "license": "UNLICENSED",
   "packageManager": "pnpm@11.21.0",
   "engines": {
-    "node": ">=20"
+    "node": ">=24"
   },
   "scripts": {
     "build": "pnpm -r --filter=./packages/* run build",
+    "link:cli": "pnpm --filter @falcon/cli exec pnpm add -g .",
     "dev:api": "pnpm --filter @falcon/api run dev",
     "dev:web": "pnpm --filter @falcon/web run dev",
     "test": "pnpm -r --filter=./packages/* run test",

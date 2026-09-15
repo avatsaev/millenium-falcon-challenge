@@ -1,0 +1,19 @@
+node_modules
+**/node_modules
+**/dist
+**/*.tsbuildinfo
+coverage
+
+.git
+.gitignore
+.github
+
+# Plan artifacts and agent bookkeeping: never part of an image.
+swe
+.pi
+.orca
+
+*.log
+.env
+.env.*
+.DS_Store

@@ -13,11 +13,33 @@ countdown deadline, minimizing exposure to bounty hunters along the way. Shared 
 
 | Signature | Inputs | Outputs | Errors |
 |-----------|--------|---------|--------|
-| `buildGraph(routes: Route[], extraPlanets?: string[]): Graph` | route rows, optional planets to force-include | `Graph { planets, planetIndex, adjacency }` | none |
-| `computeOdds(params: ComputeOddsParams): OddsResult` | `{ graph, autonomy, departure, arrival, countdown, bountyHunters }` | `{ odds, reachable, minRiskEncounters }` | `InvalidConfigError` on invalid `autonomy`/`countdown`, or departure/arrival not present in the graph |
+| `buildGraph(routes: Route[], extraPlanets?: string[]): Graph` | route rows, optional planets to force-include | `Graph { planets, planetIndex, adjacency }`; every adjacency list is sorted by `(travelTime asc, destination name asc)` | none |
+| `dedupeSightings(sightings: BountyHunterSighting[]): BountyHunterSighting[]` | raw sightings from `empire.json` | one entry per `planet`/`day` pair, sorted by `(day asc, planet asc)` | none |
+| `computeOdds(params: ComputeOddsParams): OddsResult` | `{ graph, autonomy, departure, arrival, countdown, bountyHunters }` | `{ odds, reachable, minRiskEncounters, arrivalDay, itinerary }` | `InvalidConfigError` on invalid `autonomy`/`countdown`, or departure/arrival not present in the graph |
 
-`ComputeOddsParams` and `OddsResult` are defined in `packages/core/src/types.ts` and
+`ComputeOddsParams`, `OddsResult` and `ItineraryStep` are defined in `packages/core/src/types.ts` and
 `packages/core/src/odds.ts`.
+
+```ts
+/** One day-stamped action in the Falcon's plan. */
+interface ItineraryStep {
+  /** Day the Falcon is on `planet` once this action completes (0 for the initial parked state). */
+  day: number;
+  planet: string;
+  action: "start" | "jump" | "wait" | "refuel";
+  /** Planet left behind — `jump` steps only, else null. */
+  from: string | null;
+  /** Fuel in the tank once the action completes, in days of travel. */
+  fuelAfter: number;
+  /** Bounty hunters scheduled on `planet` that `day` — i.e. a 10% capture roll. */
+  huntersPresent: boolean;
+}
+```
+
+`adjacency` sorting is **not** an optimisation: the odds value is a minimum over edges and therefore
+order-independent, but the *reconstructed plan* is chosen by first-writer-wins, so the sweep order must
+not depend on SQLite row order. Sorting adjacency at graph-build time is what makes the plan a function
+of the universe rather than of the database's insertion history.
 
 ## Behavior & algorithms
 
@@ -38,8 +60,8 @@ dp[0][departureIdx][autonomy] = risky(departure, day=0) ? 1 : 0
 all other dp[...] = +infinity
 
 for day in 0..countdown:
-  for planet in all planets:
-    for fuel in 0..autonomy:
+  for planet in all planets:                       # ascending planet index
+    for fuel in 0..autonomy:                       # ascending fuel
       current = dp[day][planet][fuel]
       if current is infinity: continue
 
@@ -47,23 +69,95 @@ for day in 0..countdown:
       # beyond the day already spent waiting, so it's always taken)
       if day + 1 <= countdown:
         risk = risky(planet, day+1) ? 1 : 0
-        dp[day+1][planet][autonomy] = min(dp[day+1][planet][autonomy], current + risk)
+        relax(dp[day+1][planet][autonomy], current + risk, steps + 1, from = this state, WAIT)
 
-      # Option 2: jump to a neighboring planet if fuel allows
+      # Option 2: jump to a neighboring planet if fuel allows (adjacency is pre-sorted)
       for edge (planet -> dest, travelTime) in adjacency[planet]:
         if travelTime > fuel: continue
         nextDay = day + travelTime
         if nextDay > countdown: continue
         risk = risky(dest, nextDay) ? 1 : 0
-        dp[nextDay][dest][fuel - travelTime] = min(dp[nextDay][dest][fuel-travelTime], current + risk)
+        relax(dp[nextDay][dest][fuel-travelTime], current + risk, steps + 1, from = this state, JUMP)
+
+# relax() takes a candidate iff it is lexicographically smaller than the incumbent:
+#   (encounters, steps) < (dp[target], stepCount[target])
+# and records the predecessor state + which action produced it.
 
 minRisk = min over day in 0..countdown, fuel in 0..autonomy of dp[day][arrivalIdx][fuel]
-if minRisk is infinity: return { odds: 0, reachable: false, minRiskEncounters: null }
-return { odds: 0.9 ^ minRisk, reachable: true, minRiskEncounters: minRisk }
+if minRisk is infinity: return { odds: 0, reachable: false, minRiskEncounters: null,
+                                 arrivalDay: null, itinerary: null }
+return { odds: 0.9 ^ minRisk, reachable: true, minRiskEncounters: minRisk,
+         arrivalDay, itinerary: reconstruct(bestArrivalState) }
 ```
 
+Every transition strictly increases `day`, so the state space is a DAG swept in topological order by
+the `day` loop: when day `d` is processed, all `dp[d][*][*]` are final. That holds for any additive,
+non-negative cost, which is why adding the `steps` component below is still exactly minimised by the
+same single sweep.
+
 Bounty hunter sightings are deduplicated into a `Set<"planet#day">` lookup before the DP runs, so
-repeated `{planet, day}` entries in `empire.json` count as a single risk trial.
+repeated `{planet, day}` entries in `empire.json` count as a single risk trial. That normalisation is
+exported as `dedupeSightings` because the API echoes the same canonical schedule back to the frontend
+for display — one definition of "one trial per planet-day", used by both.
+
+## Itinerary reconstruction
+
+`minRiskEncounters` alone cannot drive a map: a Falcon *position* needs the day-by-day plan. The DP
+therefore carries three extra parallel arrays over the same `(day, planet, fuel)` state space:
+
+| Array | Type | Meaning |
+|-------|------|---------|
+| `stepCount` | `Int32Array` | fewest transitions among the minimum-encounter paths reaching this state |
+| `prev` | `Int32Array`, `-1` sentinel | predecessor state index |
+| `prevAction` | `Int8Array` | `0` start, `1` wait/refuel, `2` jump — stored rather than inferred, so a degenerate self-route (`origin === destination`) cannot be mistaken for a wait |
+
+Memory goes from 8 to 17 bytes per state; the asymptotic bound
+`O(countdown * planets * (autonomy+1))` is unchanged — `(countdown+1) × planets × (autonomy+1)` states,
+i.e. 224/252/280/308 for examples 1-4.
+
+### Canonical plan — tie-break order
+
+Many plans are often equally optimal (README §Example 4 lists two). The chosen one is the
+lexicographic minimum of:
+
+1. **risky encounters** — required: this is what determines the odds;
+2. **arrival day** — earliest, matching the README's "*can go from Tatooine to Endor in 8 days*";
+3. **step count** — the shortest plan, so no gratuitous waiting is displayed;
+4. **sweep order** — first-writer-wins under the documented ascending `(day, planetIndex, fuel)` sweep,
+   waits relaxed before jumps, adjacency pre-sorted by `(travelTime, destination name)`.
+
+Objectives 1 and 3 are per-state DP costs; objective 2 is applied when selecting the best arrival state
+(scan days ascending, then step count). Since encounters is the primary DP cost, the `stepCount` stored
+at a state is the minimum over that state's *minimum-encounter* paths, so `(encounters, arrivalDay,
+steps)` is genuinely minimised in that priority order.
+
+### Backward walk
+
+```
+reconstruct(state):
+  chain = []
+  while state != -1: chain.push(state); state = prev[state]
+  reverse(chain)
+  for each state in chain, with its prevAction:
+    action = START                                  if prevAction == 0
+           = JUMP                                   if prevAction == 2
+           = REFUEL if previous fuel < autonomy else WAIT   if prevAction == 1
+    emit { day, planet, action, from: (JUMP ? previous planet : null),
+           fuelAfter: fuel, huntersPresent: risky(planet, day) }
+```
+
+The `wait` vs `refuel` distinction is recovered here rather than tracked in the DP (which deliberately
+treats every wait as a refuel, since refuelling is free once the day is spent). This is what lets the
+display match the README's own wording — "*Refuel on Hoth*" vs "*Wait for 1 day on Dagobah*".
+
+Invariants the reconstructed plan always satisfies (each is a test):
+
+- `itinerary[0] == { day: 0, planet: departure, action: "start", from: null, fuelAfter: autonomy }`
+- `day` is strictly increasing; the last step's `planet == arrival` and `day == arrivalDay <= countdown`
+- exactly `minRiskEncounters` steps have `huntersPresent: true`
+- for a `jump`: `day - prevDay == travelTime(from -> planet)` and `fuelAfter == prevFuelAfter - travelTime`
+- for a `wait`/`refuel`: `day == prevDay + 1`, `planet == prevPlanet`, `fuelAfter == autonomy`, and the
+  action is `refuel` exactly when `prevFuelAfter < autonomy`
 
 ## Data & persistence touchpoints
 
@@ -85,6 +179,11 @@ addressable graph nodes even when isolated (no route references them) — caller
 | Arrival unreachable within `countdown` days from any state | `{ odds: 0, reachable: false, minRiskEncounters: null }` |
 | Duplicate `{planet, day}` sightings | collapsed to one risk trial (`Set` dedup) |
 | `travelTime` exceeds `autonomy` for every edge from a planet (never refuelable to reach it) | naturally unreachable — no special-case needed, DP just never populates that state |
+| Reachable mission | `itinerary` is non-null, starts with `start` at day 0 and ends on `arrival` at `arrivalDay` |
+| Unreachable mission | `itinerary: null`, `arrivalDay: null` — callers must not assume a plan exists |
+| `departure === arrival` | `itinerary` is the single `start` step, `arrivalDay: 0` |
+| `autonomy === 0` | no jump is ever affordable, so the only reachable mission is `departure === arrival` and the itinerary is always the single `start` step — a wait step can only add risk, never remove it, so no wait is ever emitted (the fuel dimension collapses to one level; the reconstruction must not mislabel that as `refuel`) |
+| Self-route (`origin === destination`) in the routes table | classified as a `jump` via `prevAction`, not silently rendered as a wait |
 
 ## Dependencies on other specs
 
@@ -101,11 +200,53 @@ addressable graph nodes even when isolated (no route references them) — caller
 - [x] Given `departure === arrival` with a hunter on day 0, returns `odds: 0.9`, `minRiskEncounters: 1`.
 - [x] Given a disconnected graph, returns `{ odds: 0, reachable: false, minRiskEncounters: null }`.
 - [x] Given duplicate `{planet, day}` sightings, they count as a single risk trial.
+- [x] example2's itinerary is exactly: parked Tatooine (day 0, fuel 6) → jump to Hoth (day 6, fuel 0,
+      hunters) → refuel on Hoth (day 7, fuel 6, hunters) → jump to Endor (day 8, fuel 5);
+      `arrivalDay: 8`.
+- [x] example3's itinerary is exactly: parked Tatooine → jump to Dagobah (day 6, fuel 0) → refuel on
+      Dagobah (day 7, fuel 6) → jump to Hoth (day 8, fuel 5, hunters) → jump to Endor (day 9, fuel 4);
+      `arrivalDay: 9` — matching README §Example 3 verbatim.
+- [x] example4's itinerary is exactly: parked Tatooine → wait on Tatooine (day 1, fuel 6) → jump to
+      Dagobah (day 7, fuel 0) → refuel on Dagobah (day 8, fuel 6) → jump to Hoth (day 9, fuel 5) →
+      jump to Endor (day 10, fuel 4); `arrivalDay: 10`, zero `huntersPresent` steps — README §Example 4's
+      *second* listed plan.
+- [x] example1 returns `itinerary: null` and `arrivalDay: null`.
+- [x] Every returned itinerary satisfies the structural invariants above (day monotonicity, fuel
+      arithmetic, encounter count, wait-vs-refuel labelling) for all four fixtures.
+- [x] `dedupeSightings` collapses repeated `{planet, day}` pairs and returns them sorted by
+      `(day, planet)`.
+- [x] `buildGraph` returns each adjacency list sorted by `(travelTime, destination name)`, and shuffling
+      the input `routes` does not change the resulting itinerary.
+- [x] `autonomy: 0` with `departure !== arrival` stays unreachable (`itinerary: null`).
 
-(All verified by `packages/core/src/odds.test.ts`, 8 passing tests — this feature is already fully
-implemented; no further tasks needed beyond what sprint-001 already delivered.)
+(All of the above are covered by `packages/core/src/odds.test.ts` — 17 tests: 4 fixtures, 4 edge cases,
+`dedupeSightings`, and 8 itinerary-reconstruction cases including the two `autonomy: 0` branches and a
+self-route. Fixture odds are read from `examples/*/answer.json`, never from a literal in the test.)
+
+The three expected itineraries above are **not guesses**: a throwaway reference implementation of the
+DP exactly as specified here (sorted adjacency, lexicographic `(encounters, steps)` relaxation,
+ascending `(day, planetIndex, fuel)` sweep with waits relaxed before jumps, arrival selection by
+`(encounters, day, steps)`) was run against all four fixtures before this spec was finalised. It
+reproduced `answer.json`'s odds for every example (`0.0`, `0.81`, `0.9`, `1.0`) and emitted precisely
+the step lists pinned above, including example 4 resolving to README's *second* plan variant. The
+tie-break is therefore known to be implementable and to match the brief — not assumed.
 
 ## TODO(verify)
 
-- None outstanding — algorithm behavior is fully pinned by the four README examples plus edge-case
-  tests.
+- [ ] **Example 4's canonical plan is README's second variant** ("wait a day on Tatooine, then travel
+      and refuel on Dagobah"), because at day 7 on Dagobah the ascending fuel sweep reaches `fuel: 0`
+      before `fuel: 6`. Both plans are optimal and **both are printed in the README**, so either is
+      compliant. With the map static ([../features/universe-map.md](../features/universe-map.md)) there
+      is no animation-quality reason to prefer the other, so no action is expected. Preferring "depart
+      immediately" would require a fourth DP objective ("begin moving as early as possible").
+- [ ] **Do pure wait days count as capture trials?** README:22 enumerates exactly two triggers — the
+      Falcon *arrives* on a hunter planet, or it *refuels* on one. A day spent stationary with a full
+      tank (README:24's hint: "land on a planet with no bounty hunters … and wait for 1 or more days")
+      is not listed. The DP counts **every day the Falcon is present** on a hunter planet: the
+      pessimistic reading, which reproduces all four `answer.json` values, so it stays unchanged.
+      This is an **internal interpretation with no user-visible claim**: the simplified map states
+      bounty-hunter presence as a fact from `empire.json` and never attaches a probability to an
+      individual step, so nothing in the product asserts a rule the README omits. Recorded so the
+      reading is not lost; no product decision needed. Revisiting it would mean splitting the wait
+      transition into "refuel (trial)" and "idle with a full tank (no trial)" — all four example answers
+      would stay correct, but odds would rise for universes the examples do not cover.

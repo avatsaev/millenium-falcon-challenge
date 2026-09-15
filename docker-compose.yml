@@ -1,0 +1,34 @@
+# The submission as two containers: the onboard computer, and C3PO in front of it.
+#
+#   docker compose up --build            # then open http://localhost:8080
+#   UNIVERSE=./examples/example3 docker compose up --build
+#
+# `UNIVERSE` is a directory holding millennium-falcon.json and the routes database it names; `routes_db` is
+# resolved relative to the config file, so a bare "universe.db" inside that directory just works.
+
+services:
+  api:
+    build:
+      context: .
+      dockerfile: packages/api/Dockerfile
+    environment:
+      FALCON_CONFIG_PATH: /config/millennium-falcon.json
+    volumes:
+      - ${UNIVERSE:-./examples/example2}:/config:ro
+    # Published so a reviewer can curl the API directly; the SPA never needs this port.
+    ports:
+      - "4000:4000"
+    init: true
+    restart: unless-stopped
+
+  web:
+    build:
+      context: .
+      dockerfile: packages/web/Dockerfile
+    ports:
+      - "8080:80"
+    depends_on:
+      # nginx resolves `api` at startup and exits if it cannot, so wait for the health probe.
+      api:
+        condition: service_healthy
+    restart: unless-stopped
