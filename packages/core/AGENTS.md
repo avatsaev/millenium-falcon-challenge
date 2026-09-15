@@ -24,34 +24,44 @@ Workspace-wide rules live in [../../AGENTS.md](../../AGENTS.md).
 | `src/errors.ts`, `src/guards.ts` | `InvalidConfigError extends Error`, the only error type raised here; `isRecord`, **not** re-exported by `index.ts` |
 | `src/config.ts` | the three config functions + private `readJson`, `requireNonEmptyString`, `requireNonNegativeInt`, `parseBountyHunterSighting` |
 | `src/routes-db.ts` | `loadRoutes(dbPath)` — the workspace's only `better-sqlite3` callsite |
-| `src/graph.ts`, `src/odds.ts` | `GraphEdge`, `Graph`, `buildGraph(routes, extraPlanets?)`; `ComputeOddsParams`, `dedupeSightings`, `computeOdds` |
+| `src/graph.ts` | `GraphEdge`, `Graph`, `buildGraph(routes, extraPlanets?)` |
+| `src/odds.ts` | the public contract — `ComputeOddsParams`, `dedupeSightings`, `computeOdds` — plus plan reconstruction |
+| `src/odds-dp.ts` | the search machinery: `StateId`/`stateSpace`, `riskTable`, `Action`, `DpTable`, `sweep`, `selectArrival`. **Not** re-exported by `index.ts` |
+| `src/compare.ts` | `compareStrings` — the deterministic (non-locale) string order both sorts use |
 | `src/odds.test.ts` | all 17 tests in this package |
 
 ## Contracts and invariants
 
 - **Fixture odds are frozen.** `examples/example{1..4}/answer.json` → `0.0`, `0.81`, `0.9`, `1.0`. A
   change to `computeOdds`, `buildGraph`'s sort or the risk model that moves them is a regression.
-- **The DP.** Forward sweep over `(day, planetIdx, fuelRemaining)`, `day = 0..countdown`, four flat
-  arrays of `stateCount = (countdown + 1) * numPlanets * (autonomy + 1)`, addressed by
-  `stateIndex = day * dayStride + planetIdx * planetStride + fuel`: `dp: Float64Array` filled `Infinity`
-  (min risky encounters), `stepCount: Int32Array`, `prev: Int32Array` filled `-1`, `prevAction: Int8Array`
-  (`ACTION_START` 0 / `ACTION_WAIT_OR_REFUEL` 1 / `ACTION_JUMP` 2). Bound
-  `O(countdown · planets · (autonomy+1))`; the largest fixture (example4) is 308 states.
+- **The DP.** `sweep()` runs a single forward pass over `(day, planetIdx, fuelRemaining)`,
+  `day = 0..countdown`. `stateSpace()` owns every bit of index arithmetic —
+  `count = (countdown + 1) * numPlanets * (autonomy + 1)` states,
+  `id() = day * dayStride + planetIdx * planetStride + fuel`, `decode()` back again — and hands out a
+  branded `StateId`, so a state cannot be passed where a day, a fuel level or a planet index belongs.
+  `allocate()` keeps the four parallel arrays (`encounters: Float64Array` filled `Infinity`,
+  `steps: Int32Array`, `cameFrom: Int32Array` filled `-1`, `viaAction: Int8Array`) private behind
+  `isReached`/`encountersAt`/`stepsAt`/`predecessorOf`, with `seed`/`relax` on a `MutableDpTable` that
+  never leaves the module. Bound `O(countdown · planets · (autonomy+1))`; the largest fixture (example4)
+  is 308 states.
 - **Encounters, not probability.** `odds = (1 - CAPTURE_CHANCE_PER_ENCOUNTER) ** minRiskEncounters`,
   constant `0.1`; monotonic in `k`, so minimizing encounters maximizes odds with no float drift.
-- **Risk trial = presence.** A day counts iff `{planet, day}` is in the deduped sighting set: day 0 on
+- **Risk trial = presence.** A day counts iff `{planet, day}` is flagged in `riskTable`'s `(day, planet)`
+  bitmap — repeats in `empire.json` set the same flag, so dedupe is structural: day 0 on
   `departure`, every wait/refuel day, a jump's arrival day. Transit days are never checked. Counting
   *pure wait* days is a deliberate pessimistic reading of README:22 — `odds-algorithm.md` §TODO(verify)
   records why, and that it reproduces all four `answer.json` values. Do not narrow it to refuel-only.
 - **Wait is always a refuel.** The wait transition targets `fuel = autonomy` unconditionally (free once
-  the day is spent); `"wait"` vs `"refuel"` is recovered at reconstruction from `prevDecoded.fuel < autonomy`.
-- **Tie-break order** — lexicographic `(encounters, arrivalDay, stepCount, sweepOrder)`. `relax()` takes
-  the first and third per state; `arrivalDay` is applied when scanning arrival states (days ascending,
-  then lowest `stepCount`); sweep order is first-writer-wins under ascending `(day, planetIdx, fuel)`
+  the day is spent); `"wait"` vs `"refuel"` is recovered in `describeTransition` from `origin.fuel < autonomy`.
+- **Tie-break order** — lexicographic `(encounters, arrivalDay, steps, sweepOrder)`. `relax()` takes
+  the first and third per state; `arrivalDay` enters in `selectArrival`, which keeps the lexicographic
+  minimum of `(encounters, day, steps)` over the arrival planet's reached states; sweep order is
+  first-writer-wins (`relax` improves strictly) under ascending `(day, planetIdx, fuel)`
   loops, waits relaxed *before* jumps, adjacency sorted `(travelTime asc, destination name asc)` at build
   time — that sort is semantics, not speed: it makes the plan a function of the universe, not of SQLite
   row order. All four are load-bearing; the three exact itineraries in `odds.test.ts` pin them.
-  Reconstruction walks `prev` back to `-1`, reverses, maps each state via `decodeState` + `prevAction`.
+  Reconstruction walks `predecessorOf()` back to `null`, reverses, and labels each state via
+  `space.decode()` + `describeTransition`.
 - **Callers must pass `extraPlanets`.** `computeOdds` throws `InvalidConfigError` when `departure` or
   `arrival` is absent from `graph.planetIndex`; call `buildGraph(routes, [departure, arrival])`.
 - **`routes_db` resolves against the config file, not the CWD** (README:75):
@@ -94,14 +104,19 @@ Workspace-wide rules live in [../../AGENTS.md](../../AGENTS.md).
 
 ## Traps
 
-- `noUncheckedIndexedAccess` is on: every typed-array and adjacency read carries `!` (`dp[targetIdx]!`,
-  `graph.adjacency[planetIdx]!`, `planets[a.to]!`). New parallel arrays need the same.
-- `dp` uses `Infinity` for "unreached" (sweep skips on `!Number.isFinite(...)`) while `prevAction`/`stepCount`
-  default to `0`, so an unvisited state decodes as `ACTION_START` — only finite-`dp` states are walked.
+- `noUncheckedIndexedAccess` is on: every typed-array and adjacency read carries `!`
+  (`encounters[state]!`, `graph.adjacency[planetIdx]!`, `planets[a.to]!`) — but only inside
+  `odds-dp.ts`, because the `DpTable` accessors hand back plain `number`. New parallel arrays go behind
+  the same accessors rather than being read directly.
+- `Infinity` means "unreached" in `encounters` and `-1` means "no predecessor" in `cameFrom`. Both stay
+  contained: callers ask `isReached()` and `predecessorOf()`, never the sentinel. `viaAction` has no
+  sentinel at all — `start` is not an action code, it is the state whose `predecessorOf()` is `null`.
 - `buildGraph` stores **both directions** of every route (`adjacency` holds `2 * routes.length` edges; a
   self-route pushes two identical edges onto one list). Do not assume `from !== planet` on a `jump`.
-- Risk lookup and dedupe key on `` `${planet}#${day}` ``; a `#` in a planet name aliases, unvalidated.
-- `stateCount` scales with `countdown` and nothing bounds it — `requireNonNegativeInt` accepts any integer,
+- `dedupeSightings` keys `` `${day}#${planet}` `` — day first, so the delimiter is unambiguous and the
+  key injective even for a planet named `Hoth#6`. The search never keys on strings (`riskTable` is a
+  bitmap indexed by `planetIndex`).
+- `stateSpace().count` scales with `countdown` and nothing bounds it — `requireNonNegativeInt` accepts any integer,
   so a hostile `countdown` allocates ~17 bytes/state; relevant to `@falcon/api`'s `parseEmpireConfig` path.
 - `odds` is a float (`0.9 ** k`). Compare with `toBeCloseTo`, never `===`.
 - Downstream packages resolve `dist/index.d.ts` (`package.json` `types`), not `src`. Editing `src`

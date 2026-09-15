@@ -1,14 +1,22 @@
 import type { Graph } from "./graph.js";
 import type { BountyHunterSighting, ItineraryStep, OddsResult } from "./types.js";
 import { InvalidConfigError } from "./errors.js";
+import { compareStrings } from "./compare.js";
+import {
+  Action,
+  riskTable,
+  selectArrival,
+  stateSpace,
+  sweep,
+  type DpTable,
+  type Predecessor,
+  type RiskTable,
+  type StateId,
+  type StateSpace,
+} from "./odds-dp.js";
 
 /** Per-encounter chance of capture, per the bounty hunter formula in the challenge brief. */
 const CAPTURE_CHANCE_PER_ENCOUNTER = 0.1;
-
-/** DP `prevAction` codes, stored (not inferred) so a self-route jump can't be misread as a wait. */
-const ACTION_START = 0;
-const ACTION_WAIT_OR_REFUEL = 1;
-const ACTION_JUMP = 2;
 
 export interface ComputeOddsParams {
   readonly graph: Graph;
@@ -21,189 +29,138 @@ export interface ComputeOddsParams {
 
 /**
  * Collapses raw bounty-hunter sightings to one entry per `{planet, day}` pair, sorted by
- * `(day asc, planet asc)`. Exported so the API can echo the same canonical schedule it fed the DP
- * -- one definition of "one risk trial per planet-day", shared by the algorithm and the display.
+ * `(day asc, planet asc)` -- the canonical schedule the API echoes to the frontend for display.
+ *
+ * The search does not consume this: `riskTable` flattens sightings into a bitmap, where a repeat is
+ * idempotent by construction. Both therefore agree on "one risk trial per planet-day" without one
+ * depending on the other.
  */
 export function dedupeSightings(sightings: readonly BountyHunterSighting[]): BountyHunterSighting[] {
-  const byKey = new Map<string, BountyHunterSighting>();
+  const byPlanetDay = new Map<string, BountyHunterSighting>();
   for (const sighting of sightings) {
-    byKey.set(`${sighting.planet}#${sighting.day}`, sighting);
+    // Day first: it holds no `#`, so the delimiter is unambiguous and the key is injective. The
+    // other order would let a planet named `Hoth#6` alias the pair `{Hoth, 6}`.
+    byPlanetDay.set(`${sighting.day}#${sighting.planet}`, sighting);
   }
-  return [...byKey.values()].sort((a, b) => {
-    if (a.day !== b.day) return a.day - b.day;
-    return a.planet < b.planet ? -1 : a.planet > b.planet ? 1 : 0;
-  });
+  return [...byPlanetDay.values()].sort(
+    (a, b) => a.day - b.day || compareStrings(a.planet, b.planet),
+  );
 }
 
 /**
- * Computes the probability that the Millennium Falcon reaches `arrival` at or before
- * `countdown`, minimizing exposure to bounty hunters along the way, and the canonical day-by-day
- * plan that achieves it.
+ * Computes the probability that the Millennium Falcon reaches `arrival` at or before `countdown`,
+ * and the canonical day-by-day plan that achieves it.
  *
- * Modeled as a forward DP over `(day, planet, fuelRemaining)`. Every day the Falcon physically
- * occupies a planet (departure, a wait/refuel day, or a jump's landing day) is a risk trial if
- * bounty hunters are scheduled there that day. Since capture probability `1 - 0.9^k` is monotonic
- * in the encounter count `k`, minimizing `k` maximizes the odds of success, so the DP tracks the
- * minimum encounter count reachable at each state.
+ * Capture probability is `1 - 0.9^k` in the number of bounty-hunter encounters `k`, and monotonic in
+ * `k` -- so the search minimises encounters and never touches a float until the very last line. An
+ * encounter is counted for every day the Falcon *occupies* a planet the Empire has posted hunters on:
+ * day 0 on `departure`, every day spent waiting or refuelling, and a jump's landing day. Days in
+ * transit are never checked.
  *
- * Alongside the encounter-count DP, three parallel arrays record enough to reconstruct the plan:
- * `stepCount` (fewest transitions among the minimum-encounter paths reaching a state), `prev`
- * (predecessor state index) and `prevAction` (start/wait-or-refuel/jump). The chosen plan is the
- * lexicographic minimum of `(encounters, arrivalDay, stepCount, sweepOrder)` -- encounters and
- * stepCount are per-state DP costs relaxed by the single ascending `(day, planetIndex, fuel)`
- * sweep (waits before jumps, adjacency pre-sorted), arrivalDay is applied when picking the best
- * arrival state, and sweepOrder is first-writer-wins.
+ * Among equally safe plans, the one reported is the lexicographic minimum of
+ * `(encounters, arrivalDay, steps, sweep order)`; see `swe/specs/architecture/odds-algorithm.md`
+ * §Canonical plan. The search itself -- state space, sweep, arrival choice -- lives in `./odds-dp.ts`.
  *
- * `graph` must have been built with `departure` and `arrival` included (see `buildGraph`'s
- * `extraPlanets` parameter) so both are always addressable, even when isolated.
+ * `graph` must have been built with `departure` and `arrival` included (`buildGraph`'s
+ * `extraPlanets`), so both are addressable even when no route mentions them.
+ *
+ * @throws InvalidConfigError when `autonomy` or `countdown` is not a non-negative integer, or an
+ * endpoint is missing from the graph.
  */
 export function computeOdds(params: ComputeOddsParams): OddsResult {
   const { graph, autonomy, departure, arrival, countdown, bountyHunters } = params;
+  requireNonNegativeInt(autonomy, "autonomy");
+  requireNonNegativeInt(countdown, "countdown");
+  const departureIdx = requirePlanet(graph, departure, "departure");
+  const arrivalIdx = requirePlanet(graph, arrival, "arrival");
 
-  if (!Number.isInteger(autonomy) || autonomy < 0) {
-    throw new InvalidConfigError(`autonomy must be a non-negative integer, got ${autonomy}`);
-  }
-  if (!Number.isInteger(countdown) || countdown < 0) {
-    throw new InvalidConfigError(`countdown must be a non-negative integer, got ${countdown}`);
-  }
+  const space = stateSpace({ numPlanets: graph.planets.length, autonomy, countdown });
+  const risk = riskTable(graph, bountyHunters, countdown);
+  const table = sweep({ graph, space, risk, departureIdx });
 
-  const departureIdx = graph.planetIndex.get(departure);
-  if (departureIdx === undefined) {
-    throw new InvalidConfigError(`departure planet "${departure}" is not present in the graph`);
-  }
-  const arrivalIdx = graph.planetIndex.get(arrival);
-  if (arrivalIdx === undefined) {
-    throw new InvalidConfigError(`arrival planet "${arrival}" is not present in the graph`);
-  }
-
-  const riskyPlanetDays = new Set<string>();
-  for (const sighting of dedupeSightings(bountyHunters)) {
-    riskyPlanetDays.add(`${sighting.planet}#${sighting.day}`);
-  }
-  const isRisky = (planetIdx: number, day: number): boolean =>
-    riskyPlanetDays.has(`${graph.planets[planetIdx]}#${day}`);
-
-  const numPlanets = graph.planets.length;
-  const fuelLevels = autonomy + 1;
-  const planetStride = fuelLevels;
-  const dayStride = numPlanets * planetStride;
-  const stateIndex = (day: number, planetIdx: number, fuel: number): number =>
-    day * dayStride + planetIdx * planetStride + fuel;
-  const decodeState = (idx: number): { day: number; planetIdx: number; fuel: number } => {
-    const day = Math.floor(idx / dayStride);
-    const rem = idx % dayStride;
-    const planetIdx = Math.floor(rem / planetStride);
-    const fuel = rem % planetStride;
-    return { day, planetIdx, fuel };
-  };
-
-  const stateCount = (countdown + 1) * dayStride;
-  const dp = new Float64Array(stateCount).fill(Infinity);
-  const stepCount = new Int32Array(stateCount);
-  const prev = new Int32Array(stateCount).fill(-1);
-  const prevAction = new Int8Array(stateCount);
-
-  const startIdx = stateIndex(0, departureIdx, autonomy);
-  dp[startIdx] = isRisky(departureIdx, 0) ? 1 : 0;
-  stepCount[startIdx] = 0;
-  prev[startIdx] = -1;
-  prevAction[startIdx] = ACTION_START;
-
-  const relax = (targetIdx: number, candidateEncounters: number, candidateSteps: number, sourceIdx: number, action: number): void => {
-    const incumbentEncounters = dp[targetIdx]!;
-    if (candidateEncounters < incumbentEncounters || (candidateEncounters === incumbentEncounters && candidateSteps < stepCount[targetIdx]!)) {
-      dp[targetIdx] = candidateEncounters;
-      stepCount[targetIdx] = candidateSteps;
-      prev[targetIdx] = sourceIdx;
-      prevAction[targetIdx] = action;
-    }
-  };
-
-  for (let day = 0; day <= countdown; day++) {
-    for (let planetIdx = 0; planetIdx < numPlanets; planetIdx++) {
-      for (let fuel = 0; fuel <= autonomy; fuel++) {
-        const stateIdx = stateIndex(day, planetIdx, fuel);
-        const currentEncounters = dp[stateIdx]!;
-        if (!Number.isFinite(currentEncounters)) continue;
-        const currentSteps = stepCount[stateIdx]!;
-
-        // Option 1: wait one day, always refueling to full (free once the day is spent). The
-        // wait/refuel label is recovered at reconstruction time, not tracked here.
-        if (day + 1 <= countdown) {
-          const nextDay = day + 1;
-          const risk = isRisky(planetIdx, nextDay) ? 1 : 0;
-          const targetIdx = stateIndex(nextDay, planetIdx, autonomy);
-          relax(targetIdx, currentEncounters + risk, currentSteps + 1, stateIdx, ACTION_WAIT_OR_REFUEL);
-        }
-
-        // Option 2: jump to a neighboring planet, if enough fuel remains (adjacency pre-sorted).
-        for (const edge of graph.adjacency[planetIdx]!) {
-          if (edge.travelTime > fuel) continue;
-          const nextDay = day + edge.travelTime;
-          if (nextDay > countdown) continue;
-          const nextFuel = fuel - edge.travelTime;
-          const risk = isRisky(edge.to, nextDay) ? 1 : 0;
-          const targetIdx = stateIndex(nextDay, edge.to, nextFuel);
-          relax(targetIdx, currentEncounters + risk, currentSteps + 1, stateIdx, ACTION_JUMP);
-        }
-      }
-    }
-  }
-
-  let minRiskEncounters = Infinity;
-  for (let day = 0; day <= countdown; day++) {
-    for (let fuel = 0; fuel <= autonomy; fuel++) {
-      const value = dp[stateIndex(day, arrivalIdx, fuel)]!;
-      if (value < minRiskEncounters) minRiskEncounters = value;
-    }
-  }
-
-  if (!Number.isFinite(minRiskEncounters)) {
+  const best = selectArrival(table, space, arrivalIdx);
+  if (best === null) {
     return { odds: 0, reachable: false, minRiskEncounters: null, arrivalDay: null, itinerary: null };
   }
 
-  // Best arrival state: earliest day at which the global minimum encounter count is attained,
-  // breaking ties among that day's fuel levels by lowest step count.
-  let arrivalDay = -1;
-  let bestState = -1;
-  for (let day = 0; day <= countdown && arrivalDay === -1; day++) {
-    let dayBestState = -1;
-    let dayBestSteps = Infinity;
-    for (let fuel = 0; fuel <= autonomy; fuel++) {
-      const idx = stateIndex(day, arrivalIdx, fuel);
-      if (dp[idx] === minRiskEncounters && stepCount[idx]! < dayBestSteps) {
-        dayBestSteps = stepCount[idx]!;
-        dayBestState = idx;
-      }
-    }
-    if (dayBestState !== -1) {
-      arrivalDay = day;
-      bestState = dayBestState;
-    }
+  return {
+    odds: (1 - CAPTURE_CHANCE_PER_ENCOUNTER) ** best.encounters,
+    reachable: true,
+    minRiskEncounters: best.encounters,
+    arrivalDay: best.day,
+    itinerary: reconstructItinerary({
+      table,
+      space,
+      graph,
+      risk,
+      autonomy,
+      arrivalState: best.state,
+    }),
+  };
+}
+
+function requireNonNegativeInt(value: number, field: string): void {
+  if (!Number.isInteger(value) || value < 0) {
+    throw new InvalidConfigError(`${field} must be a non-negative integer, got ${value}`);
+  }
+}
+
+function requirePlanet(graph: Graph, planet: string, role: string): number {
+  const planetIdx = graph.planetIndex.get(planet);
+  if (planetIdx === undefined) {
+    throw new InvalidConfigError(`${role} planet "${planet}" is not present in the graph`);
+  }
+  return planetIdx;
+}
+
+/** Walks the recorded predecessors back from the arrival state, then reads the plan out forwards. */
+function reconstructItinerary(args: {
+  readonly table: DpTable;
+  readonly space: StateSpace;
+  readonly graph: Graph;
+  readonly risk: RiskTable;
+  readonly autonomy: number;
+  readonly arrivalState: StateId;
+}): ItineraryStep[] {
+  const { table, space, graph, risk, autonomy, arrivalState } = args;
+
+  const plan: ItineraryStep[] = [];
+  let state: StateId | null = arrivalState;
+  while (state !== null) {
+    const { day, planetIdx, fuel } = space.decode(state);
+    const predecessor = table.predecessorOf(state);
+    const { action, from } = describeTransition(predecessor, { space, graph, autonomy });
+
+    plan.push({
+      day,
+      planet: graph.planets[planetIdx]!,
+      action,
+      from,
+      fuelAfter: fuel,
+      huntersPresent: risk.has(planetIdx, day),
+    });
+    state = predecessor?.from ?? null;
   }
 
-  const chain: number[] = [];
-  for (let cur = bestState; cur !== -1; cur = prev[cur]!) chain.push(cur);
-  chain.reverse();
+  return plan.reverse();
+}
 
-  const itinerary: ItineraryStep[] = chain.map((idx, i) => {
-    const { day, planetIdx, fuel } = decodeState(idx);
-    const planet = graph.planets[planetIdx]!;
-    const action = prevAction[idx]!;
+/**
+ * The action that put the Falcon where it now is, and the planet it came from.
+ *
+ * `start` is the state with no predecessor. `wait` versus `refuel` is not something the search
+ * tracks -- a day on the ground always ends with a full tank -- so it is recovered here: the Falcon
+ * refuelled exactly when the tank was not already full when the day began.
+ */
+function describeTransition(
+  predecessor: Predecessor | null,
+  context: { readonly space: StateSpace; readonly graph: Graph; readonly autonomy: number },
+): { readonly action: ItineraryStep["action"]; readonly from: string | null } {
+  if (predecessor === null) return { action: "start", from: null };
 
-    if (action === ACTION_START) {
-      return { day, planet, action: "start", from: null, fuelAfter: fuel, huntersPresent: isRisky(planetIdx, day) };
-    }
-    const prevDecoded = decodeState(chain[i - 1]!);
-    if (action === ACTION_JUMP) {
-      const from = graph.planets[prevDecoded.planetIdx]!;
-      return { day, planet, action: "jump", from, fuelAfter: fuel, huntersPresent: isRisky(planetIdx, day) };
-    }
-    // ACTION_WAIT_OR_REFUEL: a refuel iff the predecessor's fuel was below capacity.
-    const label = prevDecoded.fuel < autonomy ? "refuel" : "wait";
-    return { day, planet, action: label, from: null, fuelAfter: fuel, huntersPresent: isRisky(planetIdx, day) };
-  });
-
-  const odds = (1 - CAPTURE_CHANCE_PER_ENCOUNTER) ** minRiskEncounters;
-  return { odds, reachable: true, minRiskEncounters, arrivalDay, itinerary };
+  const origin = context.space.decode(predecessor.from);
+  if (predecessor.action === Action.jump) {
+    return { action: "jump", from: context.graph.planets[origin.planetIdx]! };
+  }
+  return { action: origin.fuel < context.autonomy ? "refuel" : "wait", from: null };
 }

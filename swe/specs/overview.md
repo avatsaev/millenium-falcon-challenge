@@ -73,7 +73,9 @@ static files from `packages/web/dist`).
 | `packages/core/src/config.ts` | Loads/validates `millennium-falcon.json` and `empire.json` (`loadFalconConfig`, `loadEmpireConfig`, `parseEmpireConfig`) |
 | `packages/core/src/routes-db.ts` | `loadRoutes(dbPath)` — reads the `routes` table from SQLite |
 | `packages/core/src/graph.ts` | `buildGraph(routes, extraPlanets)` — undirected planet adjacency graph, each adjacency list sorted by `(travelTime, destination name)` so plan reconstruction is DB-order independent |
-| `packages/core/src/odds.ts` | `computeOdds(params)` — the core DP algorithm plus canonical-plan reconstruction (`itinerary`, `arrivalDay`) and `dedupeSightings` |
+| `packages/core/src/odds.ts` | `computeOdds(params)` — public contract, odds arithmetic, canonical-plan reconstruction (`itinerary`, `arrivalDay`), and `dedupeSightings` |
+| `packages/core/src/odds-dp.ts` | The search itself: `(day, planet, fuel)` state space, bounty-hunter risk bitmap, cost tables, forward `sweep`, `selectArrival` — internal to `core` |
+| `packages/core/src/compare.ts` | `compareStrings` — locale-independent string order, shared by the adjacency and sighting sorts |
 | `packages/core/src/index.ts` | Public barrel export |
 | `packages/api/src/app.ts` | `buildApp(options)` — Fastify instance factory, routes |
 | `packages/api/src/server.ts` | Process entrypoint — reads env, loads config once at startup, listens |

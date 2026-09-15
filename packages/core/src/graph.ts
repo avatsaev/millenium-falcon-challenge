@@ -1,3 +1,4 @@
+import { compareStrings } from "./compare.js";
 import type { Route } from "./types.js";
 
 export interface GraphEdge {
@@ -54,12 +55,7 @@ export function buildGraph(routes: readonly Route[], extraPlanets: readonly stri
   // sorting here is what makes the plan a function of the universe rather than of SQLite's
   // row-insertion order.
   for (const edges of adjacency) {
-    edges.sort((a, b) => {
-      if (a.travelTime !== b.travelTime) return a.travelTime - b.travelTime;
-      const nameA = planets[a.to]!;
-      const nameB = planets[b.to]!;
-      return nameA < nameB ? -1 : nameA > nameB ? 1 : 0;
-    });
+    edges.sort((a, b) => a.travelTime - b.travelTime || compareStrings(planets[a.to]!, planets[b.to]!));
   }
 
   return { planets, planetIndex, adjacency };

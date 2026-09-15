@@ -95,21 +95,24 @@ the `day` loop: when day `d` is processed, all `dp[d][*][*]` are final. That hol
 non-negative cost, which is why adding the `steps` component below is still exactly minimised by the
 same single sweep.
 
-Bounty hunter sightings are deduplicated into a `Set<"planet#day">` lookup before the DP runs, so
-repeated `{planet, day}` entries in `empire.json` count as a single risk trial. That normalisation is
-exported as `dedupeSightings` because the API echoes the same canonical schedule back to the frontend
-for display — one definition of "one trial per planet-day", used by both.
+Bounty hunter sightings are flattened into a `(day, planet)` bitmap (`riskTable`) before the DP runs, so
+`risky()` is a single array read and repeated `{planet, day}` entries in `empire.json` set the same flag
+— one risk trial by construction, with no explicit dedupe step in the search. The same normalisation is
+exported separately as `dedupeSightings` because the API echoes the canonical schedule back to the
+frontend for display; the two agree on "one trial per planet-day" without either depending on the other.
 
 ## Itinerary reconstruction
 
 `minRiskEncounters` alone cannot drive a map: a Falcon *position* needs the day-by-day plan. The DP
-therefore carries three extra parallel arrays over the same `(day, planet, fuel)` state space:
+therefore carries three extra parallel arrays over the same `(day, planet, fuel)` state space. All four
+are reached only through the `DpTable` accessors (`isReached`, `encountersAt`, `stepsAt`,
+`predecessorOf`), so no caller ever handles a sentinel:
 
 | Array | Type | Meaning |
 |-------|------|---------|
-| `stepCount` | `Int32Array` | fewest transitions among the minimum-encounter paths reaching this state |
-| `prev` | `Int32Array`, `-1` sentinel | predecessor state index |
-| `prevAction` | `Int8Array` | `0` start, `1` wait/refuel, `2` jump — stored rather than inferred, so a degenerate self-route (`origin === destination`) cannot be mistaken for a wait |
+| `steps` | `Int32Array` | fewest transitions among the minimum-encounter paths reaching this state |
+| `cameFrom` | `Int32Array`, `-1` sentinel | predecessor state id; `-1` is the start state, surfaced as `predecessorOf() == null` |
+| `viaAction` | `Int8Array` | `0` wait/refuel, `1` jump — stored rather than inferred, so a degenerate self-route (`origin === destination`) cannot be mistaken for a wait. `start` needs no code: it is the state with no predecessor |
 
 Memory goes from 8 to 17 bytes per state; the asymptotic bound
 `O(countdown * planets * (autonomy+1))` is unchanged — `(countdown+1) × planets × (autonomy+1)` states,
@@ -126,24 +129,27 @@ lexicographic minimum of:
 4. **sweep order** — first-writer-wins under the documented ascending `(day, planetIndex, fuel)` sweep,
    waits relaxed before jumps, adjacency pre-sorted by `(travelTime, destination name)`.
 
-Objectives 1 and 3 are per-state DP costs; objective 2 is applied when selecting the best arrival state
-(scan days ascending, then step count). Since encounters is the primary DP cost, the `stepCount` stored
-at a state is the minimum over that state's *minimum-encounter* paths, so `(encounters, arrivalDay,
-steps)` is genuinely minimised in that priority order.
+Objectives 1 and 3 are per-state DP costs; objective 2 is applied in `selectArrival`, a single pass over
+the arrival planet's reached states keeping the lexicographic minimum of `(encounters, day, steps)`.
+Since encounters is the primary DP cost, the `steps` recorded at a state is the minimum over that state's
+*minimum-encounter* paths, so `(encounters, arrivalDay, steps)` is genuinely minimised in that priority
+order.
 
 ### Backward walk
 
 ```
-reconstruct(state):
-  chain = []
-  while state != -1: chain.push(state); state = prev[state]
-  reverse(chain)
-  for each state in chain, with its prevAction:
-    action = START                                  if prevAction == 0
-           = JUMP                                   if prevAction == 2
-           = REFUEL if previous fuel < autonomy else WAIT   if prevAction == 1
-    emit { day, planet, action, from: (JUMP ? previous planet : null),
-           fuelAfter: fuel, huntersPresent: risky(planet, day) }
+reconstruct(arrivalState):
+  plan = []
+  state = arrivalState
+  while state != null:
+    predecessor = predecessorOf(state)              # null for the start state only
+    action = START                                            if predecessor == null
+           = JUMP                                             if predecessor.action == JUMP
+           = REFUEL if fuel(predecessor.from) < autonomy else WAIT
+    plan.push({ day, planet, action, from: (JUMP ? planet(predecessor.from) : null),
+                fuelAfter: fuel, huntersPresent: risky(planet, day) })
+    state = predecessor?.from
+  reverse(plan)
 ```
 
 The `wait` vs `refuel` distinction is recovered here rather than tracked in the DP (which deliberately
@@ -183,7 +189,7 @@ addressable graph nodes even when isolated (no route references them) — caller
 | Unreachable mission | `itinerary: null`, `arrivalDay: null` — callers must not assume a plan exists |
 | `departure === arrival` | `itinerary` is the single `start` step, `arrivalDay: 0` |
 | `autonomy === 0` | no jump is ever affordable, so the only reachable mission is `departure === arrival` and the itinerary is always the single `start` step — a wait step can only add risk, never remove it, so no wait is ever emitted (the fuel dimension collapses to one level; the reconstruction must not mislabel that as `refuel`) |
-| Self-route (`origin === destination`) in the routes table | classified as a `jump` via `prevAction`, not silently rendered as a wait |
+| Self-route (`origin === destination`) in the routes table | classified as a `jump` via the stored `viaAction`, not silently rendered as a wait |
 
 ## Dependencies on other specs
 
