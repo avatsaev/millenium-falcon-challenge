@@ -13,7 +13,7 @@ Workspace-wide rules live in [../../AGENTS.md](../../AGENTS.md).
 | `build` | tsup → `dist/index.js` + `dist/index.d.ts` (esm, node24, sourcemap, `clean`) |
 | `test` | `vitest run` over `src/**/*.test.ts`, node environment |
 | `dev` / `test:watch` | `tsup --watch` / `vitest` |
-| `typecheck` | `tsc --noEmit` (TypeScript 5.7); `lint` is the identical command |
+| `typecheck` | `tsc --noEmit` (TypeScript 5.7). Linting is workspace-wide: `pnpm run lint` at the root, no `lint` script here |
 
 ## Layout
 

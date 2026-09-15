@@ -1,9 +1,7 @@
-# Lint and test the workspace on every push.
+# Lint, typecheck and test the workspace on every push.
 #
-# `lint` and `typecheck` are the same command in every package (`tsc --noEmit`), so this workflow runs
-# `lint` once rather than pretending they are two gates. `build` is not a third gate: `api`, `cli` and
-# `web` resolve `@falcon/core` through its emitted `dist/*.d.ts`, so nothing typechecks or tests until
-# core is built.
+# `build` is not a gate of its own: `api`, `cli` and `web` resolve `@falcon/core` through its emitted
+# `dist/*.d.ts`, so nothing typechecks, lints or tests until core is built.
 name: CI
 
 on:
@@ -18,7 +16,7 @@ concurrency:
 
 jobs:
   verify:
-    name: lint + test
+    name: lint + typecheck + test
     runs-on: ubuntu-latest
     timeout-minutes: 10
 
@@ -40,8 +38,12 @@ jobs:
       - name: Build
         run: pnpm run build
 
+      # ESLint (flat config at the repo root, type-aware); `--max-warnings=0`, so a warning fails too.
       - name: Lint
         run: pnpm run lint
+
+      - name: Typecheck
+        run: pnpm run typecheck
 
       - name: Test
         run: pnpm run test

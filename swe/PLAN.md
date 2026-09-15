@@ -135,16 +135,23 @@ you choose to act on one.
 - [ ] **No default top-level `millennium-falcon.json` / `universe.db`.** The API and CLI always need
       an explicit path (`FALCON_CONFIG_PATH` or argv); only `examples/*` fixtures exist. Decide
       whether a default config should ship at the repo root.
-- [ ] **No real linter.** `lint` scripts alias `tsc --noEmit`; no ESLint/Biome config exists, so CI's
-      "Lint" step is a typecheck and guarantees nothing about style. Decide whether a linter is worth
-      adding before submission (would also update `specs/architecture/monorepo-tooling.md`'s contract
-      table and the workflow's step name).
+- [x] **Linter.** ESLint 10 flat config at the repo root (`eslint.config.mjs`), type-aware via
+      `typescript-eslint` `recommendedTypeChecked` + the project service, `react-hooks` for `packages/web`,
+      and a small hand-picked set on top (`eqeqeq`, `no-var`, `prefer-const`, `object-shorthand`,
+      `consistent-type-imports`, `only-throw-error`, `switch-exhaustiveness-check`,
+      `no-unnecessary-condition`, `no-restricted-imports` for cross-package relative paths, `no-console`
+      in `web`). **No formatting rules and no Prettier.** Root script is `eslint . --max-warnings=0`; the
+      per-package `lint` aliases are gone, so linting is one process over the workspace. It found 43 real
+      problems on first run — all fixed at the source, none suppressed: the API's response shapes are now
+      declared and `satisfies`-checked (which removed 30 `any` findings in its test), the duplicated
+      `fetch` stubs in `App.test.tsx` collapsed into one helper that handles `Request` inputs correctly,
+      two Fastify handlers dropped a pointless `async`, and three dead conditionals went.
 - [x] **Containers.** `packages/api/Dockerfile` + `packages/web/Dockerfile` + root `docker-compose.yml`
       ship the stack as two services (Fastify, and nginx serving the SPA and proxying `/api`), with the
       universe mounted from `${UNIVERSE:-./examples/example2}`. Verified end to end: both containers
       healthy, `81%`/`90%`/`100%` through the proxy, and a real browser upload against
       `http://localhost:8080`.
-- [x] **CI.** `.github/workflows/ci.yml` runs install → build → lint → test on every push to any branch
+- [x] **CI.** `.github/workflows/ci.yml` runs install → build → lint → typecheck → test on every push to any branch
       (plus `workflow_dispatch`), on `ubuntu-latest`, with the pnpm and Node versions read from
       `packageManager` and `.nvmrc` so CI cannot drift from local. Verified by running the identical
       sequence in a clean `git clone`: 53 tests green from a cold `--frozen-lockfile` install. Pushes

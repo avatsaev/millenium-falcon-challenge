@@ -7,15 +7,43 @@ import {
   computeOdds,
   dedupeSightings,
   parseEmpireConfig,
+  type BountyHunterSighting,
   type FalconConfig,
   type Graph,
+  type ItineraryStep,
 } from "@falcon/core";
 import Fastify, { type FastifyInstance, type FastifyRequest } from "fastify";
 
-interface RouteRow {
+export interface RouteRow {
   readonly origin: string;
   readonly destination: string;
   readonly travelTime: number;
+}
+
+/** `GET /api/universe`: the boot-scoped mission, plus the graph the odds are computed on. */
+export interface UniverseResponse {
+  readonly departure: string;
+  readonly arrival: string;
+  readonly autonomy: number;
+  readonly planets: readonly string[];
+  readonly routes: readonly RouteRow[];
+}
+
+/** `POST /api/odds`: the odds, the mission intel they were derived from, and the canonical plan. */
+export interface OddsResponse {
+  readonly odds: number;
+  readonly oddsPercent: number;
+  readonly reachable: boolean;
+  readonly minRiskEncounters: number | null;
+  readonly arrivalDay: number | null;
+  readonly countdown: number;
+  readonly bountyHunters: readonly BountyHunterSighting[];
+  readonly itinerary: readonly ItineraryStep[] | null;
+}
+
+/** The only error shape the API sends. */
+export interface ErrorResponse {
+  readonly error: string;
 }
 
 /**
@@ -75,9 +103,9 @@ export async function buildApp(options: BuildAppOptions): Promise<FastifyInstanc
   }
 
   /** Liveness probe: no in-repo consumer, but the cheapest thing a healthcheck or orchestrator can hit. */
-  app.get("/api/health", async () => ({ status: "ok" as const }));
+  app.get("/api/health", () => ({ status: "ok" as const }));
 
-  app.get("/api/universe", async () => ({
+  app.get("/api/universe", (): UniverseResponse => ({
     departure: falconConfig.departure,
     arrival: falconConfig.arrival,
     autonomy: falconConfig.autonomy,
@@ -91,7 +119,7 @@ export async function buildApp(options: BuildAppOptions): Promise<FastifyInstanc
       empirePayload = await readEmpirePayload(request);
     } catch (cause) {
       if (cause instanceof InvalidConfigError) {
-        return reply.code(400).send({ error: cause.message });
+        return reply.code(400).send({ error: cause.message } satisfies ErrorResponse);
       }
       throw cause;
     }
@@ -101,7 +129,7 @@ export async function buildApp(options: BuildAppOptions): Promise<FastifyInstanc
       empireConfig = parseEmpireConfig(empirePayload);
     } catch (cause) {
       if (cause instanceof InvalidConfigError) {
-        return reply.code(400).send({ error: cause.message });
+        return reply.code(400).send({ error: cause.message } satisfies ErrorResponse);
       }
       throw cause;
     }
@@ -124,7 +152,7 @@ export async function buildApp(options: BuildAppOptions): Promise<FastifyInstanc
       countdown: empireConfig.countdown,
       bountyHunters: dedupeSightings(empireConfig.bountyHunters),
       itinerary: result.itinerary,
-    };
+    } satisfies OddsResponse;
   });
 
   return app;

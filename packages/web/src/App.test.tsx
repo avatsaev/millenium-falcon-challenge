@@ -23,6 +23,12 @@ function empireFile(): File {
   });
 }
 
+/** All three `fetch` input forms, without `Request` stringifying to `[object Object]`. */
+function requestUrl(input: RequestInfo | URL): string {
+  if (typeof input === "string") return input;
+  return input instanceof URL ? input.href : input.url;
+}
+
 function universeResponse(): Response {
   return jsonResponse({
     departure: "Tatooine",
@@ -39,64 +45,49 @@ function universeResponse(): Response {
   });
 }
 
-/** Stubs `fetch` with the shared universe payload above and a caller-supplied `/api/odds` response. */
-function stubFetch(oddsResponse: () => Response): void {
+/** example2's answer: 81%, two hunter encounters, the four-step canonical plan. */
+function oddsResponse(): Response {
+  return jsonResponse({
+    odds: 0.81,
+    oddsPercent: 81,
+    reachable: true,
+    minRiskEncounters: 2,
+    arrivalDay: 8,
+    countdown: 8,
+    bountyHunters: [
+      { planet: "Hoth", day: 6 },
+      { planet: "Hoth", day: 7 },
+      { planet: "Hoth", day: 8 },
+    ],
+    itinerary: [
+      { day: 0, planet: "Tatooine", action: "start", from: null, fuelAfter: 6, huntersPresent: false },
+      { day: 6, planet: "Hoth", action: "jump", from: "Tatooine", fuelAfter: 0, huntersPresent: true },
+      { day: 7, planet: "Hoth", action: "refuel", from: null, fuelAfter: 6, huntersPresent: true },
+      { day: 8, planet: "Endor", action: "jump", from: "Hoth", fuelAfter: 5, huntersPresent: false },
+    ],
+  });
+}
+
+/**
+ * Stubs `fetch` for both endpoints. Either route can be overridden - including with an error response -
+ * so a test states only the payload it is actually about.
+ */
+function stubFetch(routes: { universe?: () => Response; odds?: () => Response } = {}): void {
+  const { universe = universeResponse, odds = oddsResponse } = routes;
   vi.stubGlobal(
     "fetch",
-    vi.fn(async (input: RequestInfo | URL) => {
-      const url = typeof input === "string" ? input : input.toString();
-      if (url.includes("/api/universe")) return universeResponse();
-      if (url.includes("/api/odds")) return oddsResponse();
-      throw new Error(`unexpected fetch: ${url}`);
+    vi.fn((input: RequestInfo | URL): Promise<Response> => {
+      const url = requestUrl(input);
+      if (url.includes("/api/universe")) return Promise.resolve(universe());
+      if (url.includes("/api/odds")) return Promise.resolve(odds());
+      return Promise.reject(new Error(`unexpected fetch: ${url}`));
     }),
   );
 }
 
 describe("App", () => {
   beforeEach(() => {
-    vi.stubGlobal(
-      "fetch",
-      vi.fn(async (input: RequestInfo | URL) => {
-        const url = typeof input === "string" ? input : input.toString();
-        if (url.includes("/api/universe")) {
-          return jsonResponse({
-            departure: "Tatooine",
-            arrival: "Endor",
-            autonomy: 6,
-            planets: ["Tatooine", "Endor", "Dagobah", "Hoth"],
-            routes: [
-              { origin: "Dagobah", destination: "Endor", travelTime: 4 },
-              { origin: "Dagobah", destination: "Hoth", travelTime: 1 },
-              { origin: "Dagobah", destination: "Tatooine", travelTime: 6 },
-              { origin: "Endor", destination: "Hoth", travelTime: 1 },
-              { origin: "Hoth", destination: "Tatooine", travelTime: 6 },
-            ],
-          });
-        }
-        if (url.includes("/api/odds")) {
-          return jsonResponse({
-            odds: 0.81,
-            oddsPercent: 81,
-            reachable: true,
-            minRiskEncounters: 2,
-            arrivalDay: 8,
-            countdown: 8,
-            bountyHunters: [
-              { planet: "Hoth", day: 6 },
-              { planet: "Hoth", day: 7 },
-              { planet: "Hoth", day: 8 },
-            ],
-            itinerary: [
-              { day: 0, planet: "Tatooine", action: "start", from: null, fuelAfter: 6, huntersPresent: false },
-              { day: 6, planet: "Hoth", action: "jump", from: "Tatooine", fuelAfter: 0, huntersPresent: true },
-              { day: 7, planet: "Hoth", action: "refuel", from: null, fuelAfter: 6, huntersPresent: true },
-              { day: 8, planet: "Endor", action: "jump", from: "Hoth", fuelAfter: 5, huntersPresent: false },
-            ],
-          });
-        }
-        throw new Error(`unexpected fetch: ${url}`);
-      }),
-    );
+    stubFetch();
   });
 
   it("renders the mission info once loaded", async () => {
@@ -122,28 +113,7 @@ describe("App", () => {
   });
 
   it("shows the backend's message when the upload is rejected", async () => {
-    vi.stubGlobal(
-      "fetch",
-      vi.fn(async (input: RequestInfo | URL) => {
-        const url = typeof input === "string" ? input : input.toString();
-        if (url.includes("/api/universe")) {
-          return jsonResponse({
-            departure: "Tatooine",
-            arrival: "Endor",
-            autonomy: 6,
-            planets: ["Tatooine", "Endor", "Dagobah", "Hoth"],
-            routes: [
-              { origin: "Dagobah", destination: "Endor", travelTime: 4 },
-              { origin: "Dagobah", destination: "Hoth", travelTime: 1 },
-              { origin: "Dagobah", destination: "Tatooine", travelTime: 6 },
-              { origin: "Endor", destination: "Hoth", travelTime: 1 },
-              { origin: "Hoth", destination: "Tatooine", travelTime: 6 },
-            ],
-          });
-        }
-        return jsonResponse({ error: "uploaded file is not valid JSON" }, { status: 400 });
-      }),
-    );
+    stubFetch({ odds: () => jsonResponse({ error: "uploaded file is not valid JSON" }, { status: 400 }) });
 
     renderApp();
     await waitFor(() => expect(screen.getByText("Tatooine", { selector: "strong" })).toBeInTheDocument());
@@ -166,7 +136,7 @@ describe("App", () => {
       await Promise.resolve();
     });
 
-    const missionCalls = vi.mocked(fetch).mock.calls.filter(([input]) => String(input).includes("/api/universe"));
+    const missionCalls = vi.mocked(fetch).mock.calls.filter(([input]) => requestUrl(input).includes("/api/universe"));
     expect(missionCalls).toHaveLength(1);
   });
 
@@ -215,22 +185,23 @@ describe("App", () => {
     expect(steps[2]!.textContent).toBe("Day 7 — refuel on Hoth.");
     expect(steps[3]).toHaveAttribute("data-action", "jump");
     expect(steps[3]!.textContent).toBe("Day 8 — travel from Hoth to Endor.");
-    for (const step of steps) expect(step.textContent ?? "").not.toMatch(/%|captured/i);
+    for (const step of steps) expect(step.textContent).not.toMatch(/%|captured/i);
   });
 
   it("shows no highlighted route or plan list when the mission is unreachable, but still marks hunter planets", async () => {
-    stubFetch(() =>
-      jsonResponse({
-        odds: 0,
-        oddsPercent: 0,
-        reachable: false,
-        minRiskEncounters: null,
-        arrivalDay: null,
-        countdown: 7,
-        bountyHunters: [{ planet: "Hoth", day: 6 }],
-        itinerary: null,
-      }),
-    );
+    stubFetch({
+      odds: () =>
+        jsonResponse({
+          odds: 0,
+          oddsPercent: 0,
+          reachable: false,
+          minRiskEncounters: null,
+          arrivalDay: null,
+          countdown: 7,
+          bountyHunters: [{ planet: "Hoth", day: 6 }],
+          itinerary: null,
+        }),
+    });
 
     renderApp();
     await waitFor(() => expect(screen.getByTestId("star-map")).toBeInTheDocument());
@@ -244,21 +215,22 @@ describe("App", () => {
   });
 
   it("lists an off-map sighting instead of drawing a phantom planet", async () => {
-    stubFetch(() =>
-      jsonResponse({
-        odds: 0.81,
-        oddsPercent: 81,
-        reachable: true,
-        minRiskEncounters: 1,
-        arrivalDay: 8,
-        countdown: 8,
-        bountyHunters: [{ planet: "Alderaan", day: 3 }],
-        itinerary: [
-          { day: 0, planet: "Tatooine", action: "start", from: null, fuelAfter: 6, huntersPresent: false },
-          { day: 8, planet: "Endor", action: "jump", from: "Tatooine", fuelAfter: 0, huntersPresent: false },
-        ],
-      }),
-    );
+    stubFetch({
+      odds: () =>
+        jsonResponse({
+          odds: 0.81,
+          oddsPercent: 81,
+          reachable: true,
+          minRiskEncounters: 1,
+          arrivalDay: 8,
+          countdown: 8,
+          bountyHunters: [{ planet: "Alderaan", day: 3 }],
+          itinerary: [
+            { day: 0, planet: "Tatooine", action: "start", from: null, fuelAfter: 6, huntersPresent: false },
+            { day: 8, planet: "Endor", action: "jump", from: "Tatooine", fuelAfter: 0, huntersPresent: false },
+          ],
+        }),
+    });
 
     renderApp();
     await waitFor(() => expect(screen.getByTestId("star-map")).toBeInTheDocument());
@@ -271,26 +243,20 @@ describe("App", () => {
   });
 
   it("shows an error in place of the map when the universe fails to load, without blocking the odds flow", async () => {
-    vi.stubGlobal(
-      "fetch",
-      vi.fn(async (input: RequestInfo | URL) => {
-        const url = typeof input === "string" ? input : input.toString();
-        if (url.includes("/api/universe")) return jsonResponse({ error: "onboard computer offline" }, { status: 500 });
-        if (url.includes("/api/odds")) {
-          return jsonResponse({
-            odds: 0.81,
-            oddsPercent: 81,
-            reachable: true,
-            minRiskEncounters: 2,
-            arrivalDay: 8,
-            countdown: 8,
-            bountyHunters: [],
-            itinerary: null,
-          });
-        }
-        throw new Error(`unexpected fetch: ${url}`);
-      }),
-    );
+    stubFetch({
+      universe: () => jsonResponse({ error: "onboard computer offline" }, { status: 500 }),
+      odds: () =>
+        jsonResponse({
+          odds: 0.81,
+          oddsPercent: 81,
+          reachable: true,
+          minRiskEncounters: 2,
+          arrivalDay: 8,
+          countdown: 8,
+          bountyHunters: [],
+          itinerary: null,
+        }),
+    });
 
     renderApp();
     await waitFor(() => expect(screen.getByTestId("universe-error")).toBeInTheDocument());

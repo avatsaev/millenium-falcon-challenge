@@ -70,8 +70,12 @@ pnpm run link:cli
 
 This links `packages/cli`'s built bin (`dist/cli.js`, already carrying a `#!/usr/bin/env node`
 shebang and a `bin: { "give-me-the-odds": "./dist/cli.js" }` entry) onto the global `pnpm` bin
-directory via `pnpm add -g .`, so `give-me-the-odds` resolves on `PATH`. Requires the global pnpm bin
-directory to be on `PATH` (`pnpm setup` configures this once per machine).
+directory via `pnpm add -g .`, so `give-me-the-odds` resolves on `PATH`. The global pnpm bin directory has
+to be on `PATH` *before* this runs — `pnpm add -g .` refuses with `ERROR The configured global bin
+directory … is not in PATH` rather than installing a binary that would not resolve. `pnpm setup`
+configures it once per machine; for a one-off shell,
+`export PATH="$HOME/.local/share/pnpm/bin:$PATH"`. If neither is an option, skip the install and run
+`node packages/cli/dist/cli.js <falcon.json> <empire.json>` — same program, same output.
 
 Then the exact invocation pinned by README:116-119:
 
@@ -117,19 +121,25 @@ pnpm run dev:web
 
 Vite dev server on port 5173, proxying `/api` to the running API.
 
-## Test / typecheck
+## Test / lint / typecheck
 
 ```sh
 pnpm run test
+pnpm run lint
 pnpm run typecheck
 ```
 
 53 tests: `packages/core` 17 (the DP against all four `examples/*/answer.json`, edge cases and the exact
 itineraries), `packages/web` 24, `packages/api` 8, `packages/cli` 4.
 
-`.github/workflows/ci.yml` runs the same thing on every push — `pnpm install --frozen-lockfile`, then
-`build`, `lint`, `test` on Node 24. Note that `lint` aliases `tsc --noEmit`: there is no ESLint or Biome
-config in this repo, so it is a typecheck, not a style gate.
+`lint` is ESLint 10 with a flat, **type-aware** config at the repo root (`eslint.config.mjs`), run over the
+whole workspace in one process with `--max-warnings=0`. It is set up to catch defects rather than argue
+about layout: floating and misused promises, `any` escaping a boundary, non-exhaustive switches over the
+domain unions, dead conditionals, `throw` of a non-`Error`, React hook misuse, and relative imports that
+cross a package boundary. There are deliberately **no formatting rules and no Prettier**.
+
+`.github/workflows/ci.yml` runs all of it on every push — `pnpm install --frozen-lockfile`, then `build`,
+`lint`, `typecheck`, `test` on Node 24.
 
 ## What's implemented
 

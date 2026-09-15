@@ -51,11 +51,11 @@ Run from the repo root; each maps to the same script in every package.
 | `pnpm run typecheck` | TypeScript 7 in `web` (`--noEmit` only), 5.7 elsewhere (declaration emit) |
 | `pnpm run test` | Vitest 3; 53 tests today (core 17, web 24, api 8, cli 4) |
 | `docker compose up --build` | Two containers from the repo-root context: `packages/api/Dockerfile` (Fastify, `:4000`) and `packages/web/Dockerfile` (nginx serving the SPA, `:8080`, proxying `/api`). `UNIVERSE=./examples/exampleN` picks the mounted universe |
-| `pnpm run lint` | **Aliases `tsc --noEmit`** — there is no ESLint/Biome. Do not claim "lint passes" as a style guarantee |
+| `pnpm run lint` | **ESLint 10** at the repo root (`eslint.config.mjs`, flat, type-aware) with `--max-warnings=0`. One process for the whole workspace — packages have no `lint` script. `pnpm run lint:fix` applies fixes |
 | `pnpm run link:cli` | `pnpm add -g .` in `packages/cli`, so `give-me-the-odds` lands on `PATH` |
 | `pnpm run dev:api` | `tsx watch`; needs `FALCON_CONFIG_PATH` |
 | `pnpm run dev:web` | Vite on `5173`, proxying `/api` to `http://localhost:4000` (`VITE_API_PROXY_TARGET` overrides) |
-| CI | `.github/workflows/ci.yml` — every push to any branch: install → build → lint → test. Node and pnpm versions come from `.nvmrc` and `packageManager`, so bumping either moves CI too. Fork PRs do not run it (no `pull_request:` trigger) |
+| CI | `.github/workflows/ci.yml` — every push to any branch: install → build → lint → typecheck → test. Node and pnpm versions come from `.nvmrc` and `packageManager`, so bumping either moves CI too. Fork PRs do not run it (no `pull_request:` trigger) |
 
 Scope to one package with `pnpm --filter @falcon/<name> run <script>` — prefer that while iterating, and
 run the root gates once at the end.
@@ -84,6 +84,12 @@ Production shape (what a reviewer does): `pnpm run build`, then
 - **Docs move with the contract.** A change to the HTTP payload, the algorithm's semantics, or a graded
   display rule updates the governing spec in `swe/specs/` in the same change — and `SUBMISSION.md` too if
   it changes how the thing is run.
+- **The linter enforces a slice of the above.** `eslint.config.mjs` is type-aware, so it can and does
+  check the things that matter here: floating/misused promises, `any` leaking out of a boundary,
+  non-exhaustive switches over the domain unions, dead conditionals, `throw` of a non-Error, and
+  `no-restricted-imports` for cross-package relative paths. It carries **no formatting rules** — there is
+  no Prettier and no stylistic ruleset, so it never argues about layout. Silencing a finding with a
+  disable comment needs a reason in the comment; the default answer is to fix the code.
 
 ## Verification bar
 
@@ -113,13 +119,15 @@ Both sprints are complete. Do not invent tasks or sprints: unresolved judgement 
 
 ## Traps
 
-- `pnpm link --global` **does not exist in pnpm 11**. Use `pnpm run link:cli`; the global pnpm bin
-  directory must be on `PATH` (`pnpm setup`). Rebuild before re-verifying the installed binary — the
-  global bin points at `packages/cli/dist/cli.js`.
+- `pnpm link --global` **does not exist in pnpm 11**. Use `pnpm run link:cli` — and note it *fails*
+  (exit 1, "configured global bin directory … is not in PATH") unless the global pnpm bin dir is already
+  on `PATH`; `pnpm setup` once, or `export PATH="$HOME/.local/share/pnpm/bin:$PATH"` for the shell.
+  Rebuild before re-verifying the installed binary — the global bin points at `packages/cli/dist/cli.js`.
 - The API listens on **4000**, not 3000. It has **no default config**: without `FALCON_CONFIG_PATH` it
   looks for `./millennium-falcon.json`, which does not exist at the repo root, and exits 1.
-- `core` must be built before the others typecheck; downstream packages resolve its `dist/*.d.ts`, not its
-  source.
+- `core` must be built before the others typecheck **or lint** — downstream packages resolve its
+  `dist/*.d.ts`, not its source, and the linter is type-aware, so a missing `core/dist` turns into a wall
+  of `no-unsafe-*` findings rather than one honest `TS2307`.
 - The API serves the SPA only if `packages/web/dist` exists — a stale or missing web build silently
   changes what `GET /` returns.
 - `better-sqlite3` is a native module; `pnpm-workspace.yaml` allow-lists its build script. A fresh install

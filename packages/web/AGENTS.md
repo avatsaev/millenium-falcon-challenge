@@ -22,7 +22,7 @@ still works (last test in `App.test.tsx`). Never rewrite the existing odds/tone 
 | `preview` | `vite preview` |
 | `test` | `vitest run` — jsdom, Vitest config inlined in `vite.config.ts` |
 | `typecheck` | `tsc --noEmit`, TypeScript 7 native (`typescript: ^7.0.2`) |
-| `lint` | the same `tsc --noEmit`; there is no ESLint here |
+| lint | root-level only: `pnpm run lint` runs ESLint over the workspace, and this package additionally gets `react-hooks` (`rules-of-hooks` + `exhaustive-deps`, both errors), browser globals and `no-console` |
 
 React 19 (`createRoot` under `StrictMode`), Vite 6 + `@vitejs/plugin-react` + `@tailwindcss/vite`
 (Tailwind 4), `@tanstack/react-query` 5, `lucide-react`, Vitest 3 + `@testing-library/react`.
@@ -93,7 +93,9 @@ detail. Fixture numbers are asserted against `examples/*/answer.json`, never cop
 | rail sections | `data-testid="mission"`, `"plan"`, `"hunters"`, `"off-map-sightings"` |
 | plan `<li>` | `data-step-day`, `data-action` |
 
-- `App.test.tsx` stubs `fetch` per test and renders through the real `createQueryClient()` — e.g.
+- `App.test.tsx` stubs `fetch` through one `stubFetch({ routes?, universe?, odds? })` helper (which
+  normalises `string | URL | Request` inputs — a bare `String(input)` on a `Request` yields
+  `[object Object]` and silently matches nothing) and renders through the real `createQueryClient()` — e.g.
   *"highlights the canonical plan and the hunter planet on the map after uploading"* and *"does not
   refetch the mission when the window regains focus"* (counts `/api/universe` calls via `focusManager`).
 - `map/layout.test.ts`: *"is input-order independent: shuffling planets and routes changes nothing"*,

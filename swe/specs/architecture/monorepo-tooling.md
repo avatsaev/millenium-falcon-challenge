@@ -25,11 +25,12 @@ spec/task must follow so the monorepo stays consistent as it grows.
 | Server state | `packages/web` only: TanStack Query. Reads are `useQuery`, writes are `useMutation`; no `useState`/`useEffect` fetch pairs. Retry and stale policy live in one place — `createQueryClient()` in `src/api/query.ts` — which both `main.tsx` and the tests instantiate |
 | Component state | `packages/web` holds **no** client-side state machines: every view is a pure function of the query results. If that ever stops being true, the state belongs in a dedicated hook, not scattered through components |
 | Pure derivations | Geometry and itinerary derivations are plain functions in their own modules (`src/map/layout.ts`, `src/map/plan.ts`), not component internals, so they are unit-testable without rendering |
-| Root scripts | `build`, `test`, `typecheck`, `lint` all fan out via `pnpm -r --filter=./packages/* run <script>` |
+| Root scripts | `build`, `test`, `typecheck` fan out via `pnpm -r --filter=./packages/* run <script>`. `lint` does **not** fan out: ESLint runs once at the root over the whole workspace, so packages carry no `lint` script |
 | Native deps | `better-sqlite3` requires `pnpm-workspace.yaml`'s `allowBuilds` to include it (and `esbuild`) for postinstall scripts to run. Pinned `^13`: 11.x calls `node::RemoveEnvironmentCleanupHook` from `Database::~Database()`, which aborts the process (`Assertion failed: (env) != nullptr`) when V8 runs the finalizer with no entered context — reproducible on Node 24 |
 | Node & package manager | `.nvmrc` and root `engines` pin Node **24**; `packageManager` pins pnpm 11. pnpm 11 imports `node:sqlite`, so it cannot run on Node 20 or 22. `tsup` targets `node24` in all three Node packages |
 | Container images | `packages/api/Dockerfile` (Fastify on `node:24-bookworm-slim`, multi-stage, non-root, `HEALTHCHECK` on `GET /api/health`) and `packages/web/Dockerfile` (`vite build` → `nginx:1.27-alpine` with `packages/web/nginx.conf`). Both build from the **repo root** context. Root `docker-compose.yml` runs the pair, gating `web` on the API's health probe and mounting the universe read-only from `${UNIVERSE:-./examples/example2}` at `/config` |
-| CI | `.github/workflows/ci.yml`, one `ubuntu-latest` job on every push to any branch: `pnpm install --frozen-lockfile` → `build` → `lint` → `test`. pnpm comes from `packageManager` (`pnpm/action-setup`), Node from `.nvmrc` (`node-version-file`) — CI pins nothing itself. `build` is a prerequisite, not a gate: without `packages/core/dist`, `lint` fails with `TS2307` on `@falcon/core`. Image builds are out of scope — nothing publishes them |
+| CI | `.github/workflows/ci.yml`, one `ubuntu-latest` job on every push to any branch: `pnpm install --frozen-lockfile` → `build` → `lint` → `typecheck` → `test`. pnpm comes from `packageManager` (`pnpm/action-setup`), Node from `.nvmrc` (`node-version-file`) — CI pins nothing itself. `build` is a prerequisite, not a gate: without `packages/core/dist`, downstream typechecking fails with `TS2307` on `@falcon/core`. Image builds are out of scope — nothing publishes them |
+| Linting | ESLint 10 flat config (`eslint.config.mjs`) run as `eslint . --max-warnings=0`. Type-aware (`typescript-eslint` `recommendedTypeChecked` + project service, `tsconfigRootDir` at the repo root), plus `react-hooks` for `packages/web` and `no-console` there. **No formatting or stylistic rules and no Prettier** — layout is not litigated. Config files (`*.config.ts`) sit outside every `tsconfig`'s `include`, so they are linted with `disableTypeChecked` |
 
 ## Behavior & algorithms
 
@@ -62,6 +63,5 @@ tasks know the ground rules, not because more work is needed.)
 
 ## TODO(verify)
 
-- [ ] No ESLint/Biome config exists; `lint` scripts are currently `tsc --noEmit` aliases. Decide
-      whether to add a real linter (see `overview.md`'s open questions) — if yes, this spec's
-      contract table needs an update and a task should wire it into every package + root script.
+- None. The linter question is settled: ESLint 10 flat config at the root, type-aware, no formatting
+  rules, `--max-warnings=0`, wired into the root `lint` script and CI.

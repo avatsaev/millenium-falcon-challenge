@@ -125,8 +125,8 @@ Full algorithm contract: [architecture/odds-algorithm.md](architecture/odds-algo
 - Install: `pnpm install` (root).
 - Build everything: `pnpm run build` (builds `packages/core` first via workspace dependency order,
   then `packages/api`, `packages/cli`, `packages/web`).
-- Typecheck / lint: `pnpm run typecheck` / `pnpm run lint` (lint is currently `tsc --noEmit` per
-  package — no dedicated linter installed yet).
+- Typecheck: `pnpm run typecheck` (per package). Lint: `pnpm run lint` — ESLint 10, one type-aware flat
+  config at the repo root, `--max-warnings=0`, no formatting rules.
 - Test: `pnpm run test` (Vitest per package).
 - Run API: `pnpm --filter @falcon/api run dev` (tsx watch) or `node packages/api/dist/server.js` after
   build.
@@ -166,10 +166,10 @@ preferences):
 
 **Preferences and unspecified areas:**
 
-- [ ] No `Dockerfile`/CI workflow exists yet — deployment story is unspecified. Flag if a submission
-      needs one.
-- [ ] No lint tool (ESLint/Biome) is installed; `lint` scripts currently alias `tsc --noEmit`. Decide
-      whether a real linter is worth adding before submission.
+- [x] Containers and CI landed: `packages/api/Dockerfile`, `packages/web/Dockerfile`, root
+      `docker-compose.yml`, and `.github/workflows/ci.yml` (install → build → lint → typecheck → test).
+- [x] Linter settled: ESLint 10 flat config at the root (`eslint.config.mjs`), type-aware, workspace-wide,
+      no formatting rules, wired into the root `lint` script and CI.
 - [ ] No root-level `millennium-falcon.json`/`universe.db` exists outside `examples/*` — API/CLI
       always need an explicit path today. Decide if a default top-level config should ship.
 - [ ] Example 4 has two equally optimal plans and the README prints both; the documented tie-break picks

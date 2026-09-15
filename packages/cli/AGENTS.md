@@ -13,7 +13,7 @@ Workspace-wide rules live in [../../AGENTS.md](../../AGENTS.md).
 | `pnpm --filter @falcon/cli run build` | tsup → `dist/cli.js` (+ `.map`), `clean: true` |
 | `pnpm --filter @falcon/cli run dev` | `tsup --watch` |
 | `pnpm --filter @falcon/cli run test` | `vitest run` (`src/**/*.test.ts`) |
-| `pnpm --filter @falcon/cli run typecheck` | `tsc --noEmit`; `lint` is the same command |
+| `pnpm --filter @falcon/cli run typecheck` | `tsc --noEmit`. Lint from the root (`pnpm run lint`) — there is no per-package `lint` script |
 
 Install the executable from the repo root, **after** a full `pnpm run build`:
 
@@ -26,7 +26,10 @@ give-me-the-odds examples/example2/millennium-falcon.json examples/example2/empi
 - `pnpm link --global` does **not** work here: pnpm 11 (`packageManager: pnpm@11.21.0`) removed it;
   `pnpm link` now takes only an explicit `<dir>` and has no `--global` flag. `pnpm add -g .` is the
   replacement — see `swe/sprints/sprint-002-universe-map/done/task-001-cli-installed-executable-summary.md`.
-- The global pnpm bin directory must be on `PATH` or the linked bin will not resolve.
+- The global pnpm bin directory must already be on `PATH` **before** installing: `pnpm add -g .` refuses
+  outright (`ERROR The configured global bin directory "…/.local/share/pnpm/bin" is not in PATH`, exit 1)
+  rather than installing something that would not resolve. Fix it once with `pnpm setup`, or export the
+  path for the shell: `export PATH="$HOME/.local/share/pnpm/bin:$PATH"`.
 - Fallback with no global install: `node packages/cli/dist/cli.js <falcon.json> <empire.json>`.
 
 ## Layout

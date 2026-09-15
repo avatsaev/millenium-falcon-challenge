@@ -139,7 +139,7 @@ export function StarMap({ universe, itinerary, sightings }: StarMapProps): React
                   className="fill-current font-semibold text-alert"
                   style={{ fontSize: HUNTER_DAYS_LABEL_SIZE }}
                 >
-                  {days!.map((day) => `d${day}`).join(", ")}
+                  {days.map((day) => `d${day}`).join(", ")}
                 </text>
               </>
             )}

@@ -13,7 +13,7 @@ and any reviewer with `curl`. Workspace-wide rules live in [../../AGENTS.md](../
 | `pnpm --filter @falcon/api run build` | `tsup` → `dist/server.js` (ESM, node24, `better-sqlite3` external) |
 | `pnpm --filter @falcon/api run start` | `node dist/server.js` (needs `run build` first) |
 | `pnpm --filter @falcon/api run test` | `vitest run` — `src/**/*.test.ts`, node environment |
-| `pnpm --filter @falcon/api run typecheck` | `tsc --noEmit` (TS 5.7); `run lint` is the same command |
+| `pnpm --filter @falcon/api run typecheck` | `tsc --noEmit` (TS 5.7). Lint from the root (`pnpm run lint`) — ESLint is one workspace-wide process |
 
 Env, read only in `src/server.ts`: `FALCON_CONFIG_PATH` (default `millennium-falcon.json`, `resolve`d
 against cwd), `PORT` (default `4000`), `HOST` (default `0.0.0.0`).
@@ -24,7 +24,7 @@ against cwd), `PORT` (default `4000`), `HOST` (default `0.0.0.0`).
 |------|------|
 | `src/app.ts` | `buildApp(options)` — the whole HTTP surface; pure function of injected config/graph |
 | `src/server.ts` | Entry: env → `loadFalconConfig`/`loadRoutes`/`buildGraph` → `staticRoot` → `listen` |
-| `src/app.test.ts` | Only test file; 9 `it` blocks driven by `app.inject` and `examples/*` fixtures |
+| `src/app.test.ts` | Only test file; 8 `it` blocks driven by `app.inject` and `examples/*` fixtures, each booting through the local `startApp(fixture)` helper (which also registers the instance for `afterEach` teardown) |
 | `Dockerfile` | Multi-stage image; **build context is the repo root**, not this directory. Stages: `manifests` (package.json + lockfile only) → `toolchain` (python3/make/g++ for the native addon) → `build` / `prod-deps` → `runtime`. Runs as `node`, `HEALTHCHECK` hits `GET /api/health`, universe mounted at `/config` |
 
 ## Contracts and invariants
@@ -45,6 +45,12 @@ against cwd), `PORT` (default `4000`), `HOST` (default `0.0.0.0`).
   multipart file, uploaded bytes not JSON, or `parseEmpireConfig` rejection. Anything else rethrows.
 - `GET /api/mission` was removed outright — no alias, no redirect, `404` asserted by a test; do not
   reintroduce it. `graph.adjacency` is deliberately never serialised.
+- The two success shapes and the failure shape are **declared** in `src/app.ts` (`UniverseResponse`,
+  `OddsResponse`, `ErrorResponse`) and every handler's payload is checked with `satisfies` at the
+  `reply.send()` / return site, so a typo or a dropped field is a compile error rather than a runtime
+  surprise. `app.test.ts` reads bodies as `response.json<UniverseResponse>()` etc. for the same reason.
+  These are the API's own wire types; `packages/web/src/api/types.ts` declares its mirror independently
+  (no cross-package import — the web client must keep working against a deployed API).
 - Route order is deterministic: each edge kept once (`edge.to <= planetIdx` skip),
   `[origin, destination]` normalised lexicographically, then sorted `(origin asc, destination asc)`.
   Sightings are echoed via `dedupeSightings` (one per `{planet, day}`, `(day, planet)` asc) — the same
