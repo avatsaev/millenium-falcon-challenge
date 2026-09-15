@@ -179,7 +179,8 @@ addressable graph nodes even when isolated (no route references them) — caller
 
 | Condition | Expected behavior |
 |-----------|-------------------|
-| `autonomy` or `countdown` not a non-negative integer | throws `InvalidConfigError` |
+| `autonomy` or `countdown` not a non-negative *safe* integer (`Number.isSafeInteger`) | throws `InvalidConfigError` |
+| `countdown` large enough that `(countdown + 1) × numPlanets × (autonomy + 1)` exceeds `MAX_STATE_COUNT` (5,000,000 — three orders of magnitude above any real mission) | throws `InvalidConfigError` instead of allocating the DP's typed arrays at that size. `countdown` is attacker-controlled on the API (uploaded `empire.json`); this is the request-time guard against an unbounded/`RangeError`-inducing allocation |
 | `departure`/`arrival` not present in `graph.planetIndex` | throws `InvalidConfigError` |
 | `departure === arrival` | valid; DP still runs, day-0 risk check applies (see edge case tests) |
 | Arrival unreachable within `countdown` days from any state | `{ odds: 0, reachable: false, minRiskEncounters: null }` |

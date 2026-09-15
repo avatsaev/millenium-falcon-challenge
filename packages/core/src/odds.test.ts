@@ -8,6 +8,7 @@ import { computeOdds } from "./odds.js";
 import { dedupeSightings } from "./odds.js";
 import { loadEmpireConfig, loadFalconConfig } from "./config.js";
 import { loadRoutes } from "./routes-db.js";
+import { InvalidConfigError } from "./errors.js";
 import type { OddsResult, Route } from "./types.js";
 
 const here = dirname(fileURLToPath(import.meta.url));
@@ -177,6 +178,34 @@ describe("computeOdds edge cases", () => {
       ],
     });
     expect(result.minRiskEncounters).toBe(1);
+  });
+
+  it("rejects a countdown whose (day, planet, fuel) grid would exceed the state-count ceiling", () => {
+    const graph = buildGraph([{ origin: "Tatooine", destination: "Dagobah", travelTime: 1 }]);
+    expect(() =>
+      computeOdds({
+        graph,
+        autonomy: 1000,
+        departure: "Tatooine",
+        arrival: "Dagobah",
+        countdown: 10_000_000,
+        bountyHunters: [],
+      }),
+    ).toThrow(InvalidConfigError);
+  });
+
+  it("rejects a non-safe-integer countdown instead of silently truncating or overflowing the state grid", () => {
+    const graph = buildGraph([], ["Tatooine"]);
+    expect(() =>
+      computeOdds({
+        graph,
+        autonomy: 6,
+        departure: "Tatooine",
+        arrival: "Tatooine",
+        countdown: 1e100,
+        bountyHunters: [],
+      }),
+    ).toThrow(InvalidConfigError);
   });
 });
 

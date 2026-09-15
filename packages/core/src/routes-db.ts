@@ -10,7 +10,10 @@ interface RouteRow {
 
 /**
  * Loads the routes table from the SQLite database at `dbPath`. SQLite identifiers are
- * case-insensitive, so this reads the `routes`/`ROUTES` table regardless of casing.
+ * case-insensitive, so this reads the `routes`/`ROUTES` table regardless of casing. Column names are
+ * aliased explicitly to their lowercase form: better-sqlite3 returns each result key using the
+ * *declared* column casing (e.g. `ORIGIN`), not the casing used in the query, so an unaliased SELECT
+ * against a schema declared in uppercase would silently produce `undefined` for every field below.
  */
 export function loadRoutes(dbPath: string): Route[] {
   let db: Database.Database;
@@ -21,7 +24,9 @@ export function loadRoutes(dbPath: string): Route[] {
   }
 
   try {
-    const rows = db.prepare("SELECT origin, destination, travel_time FROM routes").all() as RouteRow[];
+    const rows = db
+      .prepare("SELECT origin AS origin, destination AS destination, travel_time AS travel_time FROM routes")
+      .all() as RouteRow[];
     return rows.map((row, index) => {
       if (typeof row.origin !== "string" || row.origin.length === 0) {
         throw new InvalidConfigError(`routes[${index}].origin must be a non-empty string`);

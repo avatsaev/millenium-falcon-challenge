@@ -18,6 +18,15 @@ import {
 /** Per-encounter chance of capture, per the bounty hunter formula in the challenge brief. */
 const CAPTURE_CHANCE_PER_ENCOUNTER = 0.1;
 
+/**
+ * Ceiling on the `(day, planet, fuel)` grid's total cell count. `countdown` is attacker-controlled on
+ * the API (it comes from the uploaded empire.json), and the DP allocates several typed arrays sized to
+ * it up front -- without a bound, a huge or non-finite countdown turns into a multi-gigabyte allocation
+ * (or a `RangeError` from the typed array constructor) instead of a clean rejection. Any legitimate
+ * mission's grid is a few thousand cells; this leaves three orders of magnitude of headroom.
+ */
+const MAX_STATE_COUNT = 5_000_000;
+
 export interface ComputeOddsParams {
   readonly graph: Graph;
   readonly autonomy: number;
@@ -74,6 +83,13 @@ export function computeOdds(params: ComputeOddsParams): OddsResult {
   const departureIdx = requirePlanet(graph, departure, "departure");
   const arrivalIdx = requirePlanet(graph, arrival, "arrival");
 
+  const projectedStates = (countdown + 1) * graph.planets.length * (autonomy + 1);
+  if (projectedStates > MAX_STATE_COUNT) {
+    throw new InvalidConfigError(
+      `countdown ${countdown} is too large for this universe (autonomy ${autonomy}, ${graph.planets.length} planets): the search space would need ${projectedStates} states, over the ${MAX_STATE_COUNT} limit`,
+    );
+  }
+
   const space = stateSpace({ numPlanets: graph.planets.length, autonomy, countdown });
   const risk = riskTable(graph, bountyHunters, countdown);
   const table = sweep({ graph, space, risk, departureIdx });
@@ -100,7 +116,7 @@ export function computeOdds(params: ComputeOddsParams): OddsResult {
 }
 
 function requireNonNegativeInt(value: number, field: string): void {
-  if (!Number.isInteger(value) || value < 0) {
+  if (!Number.isSafeInteger(value) || value < 0) {
     throw new InvalidConfigError(`${field} must be a non-negative integer, got ${value}`);
   }
 }

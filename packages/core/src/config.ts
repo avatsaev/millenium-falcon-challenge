@@ -26,7 +26,7 @@ function requireNonEmptyString(value: unknown, field: string): string {
 }
 
 function requireNonNegativeInt(value: unknown, field: string): number {
-  if (typeof value !== "number" || !Number.isInteger(value) || value < 0) {
+  if (typeof value !== "number" || !Number.isSafeInteger(value) || value < 0) {
     throw new InvalidConfigError(`"${field}" must be a non-negative integer, got ${JSON.stringify(value)}`);
   }
   return value;

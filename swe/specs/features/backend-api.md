@@ -135,3 +135,7 @@ The universe endpoint and the widened odds payload are new work introduced by
 
 - [ ] No request size/rate limiting beyond the 5 MiB multipart file-size cap — acceptable for a
       technical-test scope; flag if production hardening is ever required.
+- [x] `computeOdds` (in `@falcon/core`) rejects a `countdown` whose `(day, planet, fuel)` grid would
+      exceed `MAX_STATE_COUNT` (5,000,000 states) with a normal `InvalidConfigError` → `400`, instead of
+      letting an attacker-controlled `empire.json` countdown drive an unbounded typed-array allocation.
+      Independent of the file-size cap above, which bounds the upload, not the derived computation.
