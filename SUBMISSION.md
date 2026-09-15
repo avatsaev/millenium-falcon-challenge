@@ -178,6 +178,11 @@ The output of that is committed under `swe/`, so the whole development history i
 asserted: `PLAN.md` (strategy, task index, coverage), `specs/` (four feature specs, three architecture
 specs), and `sprints/` — two sprints, twelve tasks, each with its audit trail in `done/`.
 
+Two things landed outside that plan, and the trail says so rather than pretending otherwise: the
+container setup and the CI workflow were done directly and recorded as resolved items in `PLAN.md`
+§ *Open questions* — they have no task file and no summary, because they were never scoped as sprint
+work. What remains open there is open on purpose, not forgotten.
+
 ### Why this setup
 
 The challenge is small in code but specification-heavy: four worked examples that pin the algorithm's

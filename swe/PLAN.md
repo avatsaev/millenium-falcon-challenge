@@ -121,8 +121,12 @@ you choose to act on one.
 
 ## Open questions — TODO(verify)
 
-- [ ] **AI-tool disclosure.** `README.md` § Final note requires stating which AI tool was used and
-      why. Not yet written anywhere in the repo; should be authored in the submitter's own voice.
+- [x] **AI-tool disclosure.** `SUBMISSION.md` § *AI tools used* answers `README.md`:239 in the
+      submitter's own voice: the harness, the `av-swe` skill (self-authored, linked), the Opus/Sonnet
+      split between planning and implementation, why that shape suits a specification-heavy challenge,
+      and the statement that nothing was accepted on the agent's word. It also records that the
+      containers and CI landed as resolved § *Open questions* items rather than as sprint tasks, so the
+      `swe/` audit trail is not claimed to cover them.
 - [x] **CLI on `PATH`** — scheduled as s002/task-001. The `bin` entry and shebang already exist and
       `dist/cli.js` is emitted executable; only the install step was missing, so the task adds a
       `link:cli` root script and documents the verified invocation.
