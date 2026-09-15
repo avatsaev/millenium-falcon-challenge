@@ -84,7 +84,7 @@ with `curl` (JSON body, real multipart upload, 400 path), and a real-browser run
 live API for the 0% / 81% / 100% display states.
 
 **Sprint-002 is complete** (all 6 tasks in `swe/sprints/sprint-002-universe-map/done/`, each with its
-summary). 53 tests passing across 4 packages (core 17, web 24, cli 4, api 8); `pnpm run build`,
+summary). 59 tests passing across 4 packages (core 23, web 24, cli 4, api 8); `pnpm run build`,
 `pnpm run typecheck` and `pnpm run test` all green. What landed:
 
 - the CLI is a real installed executable (`pnpm run link:cli`), with `SUBMISSION.md` documenting the

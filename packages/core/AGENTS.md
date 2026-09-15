@@ -28,7 +28,8 @@ Workspace-wide rules live in [../../AGENTS.md](../../AGENTS.md).
 | `src/odds.ts` | the public contract — `ComputeOddsParams`, `dedupeSightings`, `computeOdds` — plus plan reconstruction |
 | `src/odds-dp.ts` | the search machinery: `StateId`/`stateSpace`, `riskTable`, `Action`, `DpTable`, `sweep`, `selectArrival`. **Not** re-exported by `index.ts` |
 | `src/compare.ts` | `compareStrings` — the deterministic (non-locale) string order both sorts use |
-| `src/odds.test.ts` | all 17 tests in this package |
+| `src/odds.test.ts` | 19 tests: 4 fixtures, 6 edge cases, `dedupeSightings`, 8 itinerary-reconstruction cases |
+| `src/routes-db.test.ts` | 4 tests: the lowercase and README-uppercase schemas, a bad `travel_time`, a missing file |
 
 ## Contracts and invariants
 

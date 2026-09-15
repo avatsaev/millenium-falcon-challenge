@@ -49,7 +49,7 @@ Run from the repo root; each maps to the same script in every package.
 | `pnpm install` | pnpm 11 (`packageManager` pins it), Node 24 (`.nvmrc`, root `engines`) — pnpm 11 imports `node:sqlite`, so Node 20/22 cannot run it |
 | `pnpm run build` | `core` first — `api`/`cli`/`web` resolve its `dist/*.d.ts` |
 | `pnpm run typecheck` | TypeScript 7 in `web` (`--noEmit` only), 5.7 elsewhere (declaration emit) |
-| `pnpm run test` | Vitest 3; 53 tests today (core 17, web 24, api 8, cli 4) |
+| `pnpm run test` | Vitest 3; 59 tests today (core 23, web 24, api 8, cli 4) |
 | `docker compose up --build` | Two containers from the repo-root context: `packages/api/Dockerfile` (Fastify, `:4000`) and `packages/web/Dockerfile` (nginx serving the SPA, `:8080`, proxying `/api`). `UNIVERSE=./examples/exampleN` picks the mounted universe |
 | `pnpm run lint` | **ESLint 10** at the repo root (`eslint.config.mjs`, flat, type-aware) with `--max-warnings=0`. One process for the whole workspace — packages have no `lint` script. `pnpm run lint:fix` applies fixes |
 | `pnpm run link:cli` | `pnpm add -g .` in `packages/cli`, so `give-me-the-odds` lands on `PATH` |

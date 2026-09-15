@@ -129,8 +129,8 @@ pnpm run lint
 pnpm run typecheck
 ```
 
-53 tests: `packages/core` 17 (the DP against all four `examples/*/answer.json`, edge cases and the exact
-itineraries), `packages/web` 24, `packages/api` 8, `packages/cli` 4.
+59 tests: `packages/core` 23 (the DP against all four `examples/*/answer.json`, edge cases, the exact
+itineraries, and the SQLite reader), `packages/web` 24, `packages/api` 8, `packages/cli` 4.
 
 `lint` is ESLint 10 with a flat, **type-aware** config at the repo root (`eslint.config.mjs`), run over the
 whole workspace in one process with `--max-warnings=0`. It is set up to catch defects rather than argue
@@ -156,7 +156,7 @@ i.e. `1 - 0.9^k` for `k` encounters. Waiting is modelled as a refuel (refuelling
 is spent), so `O(countdown × planets × (autonomy + 1))` states cover travel, refuel and wait alike —
 308 states for the example universe.
 
-53 tests: `packages/core` 17 (algorithm + loaders, asserted against `examples/*/answer.json`),
+59 tests: `packages/core` 23 (algorithm + loaders, asserted against `examples/*/answer.json`),
 `packages/api` 8 (both payload shapes, error paths), `packages/web` 24 (odds display, map, layout and
 itinerary derivations), `packages/cli` 4 (all four fixtures + error paths). The frontend and the
 `give-me-the-odds` invocation were additionally verified in a real browser and a real shell against a

@@ -226,7 +226,7 @@ addressable graph nodes even when isolated (no route references them) — caller
       the input `routes` does not change the resulting itinerary.
 - [x] `autonomy: 0` with `departure !== arrival` stays unreachable (`itinerary: null`).
 
-(All of the above are covered by `packages/core/src/odds.test.ts` — 17 tests: 4 fixtures, 4 edge cases,
+(All of the above are covered by `packages/core/src/odds.test.ts` — 19 tests: 4 fixtures, 6 edge cases,
 `dedupeSightings`, and 8 itinerary-reconstruction cases including the two `autonomy: 0` branches and a
 self-route. Fixture odds are read from `examples/*/answer.json`, never from a literal in the test.)
 
