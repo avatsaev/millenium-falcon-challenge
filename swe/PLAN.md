@@ -131,15 +131,22 @@ you choose to act on one.
 - [ ] **No default top-level `millennium-falcon.json` / `universe.db`.** The API and CLI always need
       an explicit path (`FALCON_CONFIG_PATH` or argv); only `examples/*` fixtures exist. Decide
       whether a default config should ship at the repo root.
-- [ ] **No real linter.** `lint` scripts alias `tsc --noEmit`; no ESLint/Biome config exists. Decide
-      whether a linter is worth adding before submission (would also update
-      `specs/architecture/monorepo-tooling.md`'s contract table).
+- [ ] **No real linter.** `lint` scripts alias `tsc --noEmit`; no ESLint/Biome config exists, so CI's
+      "Lint" step is a typecheck and guarantees nothing about style. Decide whether a linter is worth
+      adding before submission (would also update `specs/architecture/monorepo-tooling.md`'s contract
+      table and the workflow's step name).
 - [x] **Containers.** `packages/api/Dockerfile` + `packages/web/Dockerfile` + root `docker-compose.yml`
       ship the stack as two services (Fastify, and nginx serving the SPA and proxying `/api`), with the
       universe mounted from `${UNIVERSE:-./examples/example2}`. Verified end to end: both containers
       healthy, `81%`/`90%`/`100%` through the proxy, and a real browser upload against
-      `http://localhost:8080`. **CI is still unspecified** — no workflow exists; decide whether the
-      submission needs one.
+      `http://localhost:8080`.
+- [x] **CI.** `.github/workflows/ci.yml` runs install → build → lint → test on every push to any branch
+      (plus `workflow_dispatch`), on `ubuntu-latest`, with the pnpm and Node versions read from
+      `packageManager` and `.nvmrc` so CI cannot drift from local. Verified by running the identical
+      sequence in a clean `git clone`: 53 tests green from a cold `--frozen-lockfile` install. Pushes
+      from **forks** do not run it — add a `pull_request:` trigger if that is ever needed. The image
+      builds are deliberately **not** in CI: nothing publishes them, so it would be minutes of build
+      time proving something no consumer reads.
 - [x] **Itinerary output** — scheduled as s002/task-002: `computeOdds` now returns the canonical plan and
       arrival day. The README does not demand it, but the universe map is built on it and the README's
       worked examples pin the expected plans exactly.

@@ -55,6 +55,7 @@ Run from the repo root; each maps to the same script in every package.
 | `pnpm run link:cli` | `pnpm add -g .` in `packages/cli`, so `give-me-the-odds` lands on `PATH` |
 | `pnpm run dev:api` | `tsx watch`; needs `FALCON_CONFIG_PATH` |
 | `pnpm run dev:web` | Vite on `5173`, proxying `/api` to `http://localhost:4000` (`VITE_API_PROXY_TARGET` overrides) |
+| CI | `.github/workflows/ci.yml` — every push to any branch: install → build → lint → test. Node and pnpm versions come from `.nvmrc` and `packageManager`, so bumping either moves CI too. Fork PRs do not run it (no `pull_request:` trigger) |
 
 Scope to one package with `pnpm --filter @falcon/<name> run <script>` — prefer that while iterating, and
 run the root gates once at the end.

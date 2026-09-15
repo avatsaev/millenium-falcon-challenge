@@ -124,6 +124,13 @@ pnpm run test
 pnpm run typecheck
 ```
 
+53 tests: `packages/core` 17 (the DP against all four `examples/*/answer.json`, edge cases and the exact
+itineraries), `packages/web` 24, `packages/api` 8, `packages/cli` 4.
+
+`.github/workflows/ci.yml` runs the same thing on every push — `pnpm install --frozen-lockfile`, then
+`build`, `lint`, `test` on Node 24. Note that `lint` aliases `tsc --noEmit`: there is no ESLint or Biome
+config in this repo, so it is a typecheck, not a style gate.
+
 ## What's implemented
 
 | Piece | Where | Notes |
