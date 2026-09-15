@@ -1,0 +1,13 @@
+node_modules/
+dist/
+build/
+*.log
+.DS_Store
+.env
+.env.*
+coverage/
+*.tsbuildinfo
+packages/web/dist/
+
+# agent-local bookkeeping, not project state
+.pi/

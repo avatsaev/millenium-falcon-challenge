@@ -1,0 +1,28 @@
+@import "tailwindcss";
+
+@theme {
+  --font-sans: "Inter", "Segoe UI", system-ui, sans-serif;
+
+  --color-void: #05060a;
+  --color-hull: #10131c;
+  --color-panel: #0d1017;
+  --color-seam: #262b3a;
+  --color-gold: #c9a227;
+  --color-starlight: #e8ecf6;
+  --color-dim: #a9b1c6;
+  --color-go: #4caf82;
+  --color-alert: #ef6461;
+}
+
+@layer base {
+  html {
+    color-scheme: dark;
+  }
+
+  body {
+    min-height: 100vh;
+    background: radial-gradient(circle at top, var(--color-hull) 0%, var(--color-void) 70%);
+    color: var(--color-starlight);
+    font-family: var(--font-sans);
+  }
+}

@@ -1,0 +1,27 @@
+{
+  "name": "@falcon/cli",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "give-me-the-odds -- prints the Millennium Falcon's odds of success as a 0-100 integer.",
+  "bin": {
+    "give-me-the-odds": "./dist/cli.js"
+  },
+  "files": ["dist"],
+  "scripts": {
+    "build": "tsup",
+    "dev": "tsup --watch",
+    "test": "vitest run",
+    "typecheck": "tsc --noEmit",
+    "lint": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@falcon/core": "workspace:*"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.7",
+    "tsup": "^8.3.5",
+    "typescript": "^5.7.3",
+    "vitest": "^3.0.4"
+  }
+}

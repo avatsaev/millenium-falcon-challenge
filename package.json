@@ -1,0 +1,22 @@
+{
+  "name": "millennium-falcon-challenge",
+  "private": true,
+  "version": "0.0.0",
+  "description": "What are the odds? -- Millennium Falcon challenge monorepo.",
+  "license": "UNLICENSED",
+  "packageManager": "pnpm@11.21.0",
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "build": "pnpm -r --filter=./packages/* run build",
+    "dev:api": "pnpm --filter @falcon/api run dev",
+    "dev:web": "pnpm --filter @falcon/web run dev",
+    "test": "pnpm -r --filter=./packages/* run test",
+    "typecheck": "pnpm -r --filter=./packages/* run typecheck",
+    "lint": "pnpm -r --filter=./packages/* run lint"
+  },
+  "devDependencies": {
+    "typescript": "^5.7.3"
+  }
+}

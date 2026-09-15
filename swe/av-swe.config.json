@@ -1,0 +1,21 @@
+{
+  "planRoot": "swe",
+  "build": "pnpm run build",
+  "typecheck": "pnpm run typecheck",
+  "lint": "pnpm run lint",
+  "test": "pnpm run test",
+  "skipGates": [],
+  "parallelSprints": true,
+  "notesDir": "notes",
+  "layout": {
+    "comment": "Sprints live under swe/sprints/ rather than directly under the plan root, keeping the plan root to PLAN.md + specs/ + notes/ + sprints/.",
+    "sprintsDir": "sprints"
+  },
+  "gateNotes": {
+    "comment": "Per-package scoped commands for focused task verification; the root build/typecheck/lint/test commands above still run once at sprint end.",
+    "core": "pnpm --filter @falcon/core run <build|typecheck|test>",
+    "api": "pnpm --filter @falcon/api run <build|typecheck|test>",
+    "cli": "pnpm --filter @falcon/cli run <build|typecheck|test>",
+    "web": "pnpm --filter @falcon/web run <build|typecheck|test>"
+  }
+}
